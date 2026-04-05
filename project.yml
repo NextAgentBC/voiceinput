@@ -1,0 +1,53 @@
+name: VoiceInputIME
+options:
+  bundleIdPrefix: com.voiceinput
+  deploymentTarget:
+    macOS: '14.0'
+  xcodeVersion: '16.0'
+
+targets:
+  VoiceInputIME:
+    type: application
+    platform: macOS
+
+    sources:
+      - path: Sources/VoiceInputIME
+      - path: Resources
+        excludes:
+          - Info.plist
+          - rime
+        buildPhase: resources
+
+    postBuildScripts:
+      - script: |
+          pkill -9 -f VoiceInputIME 2>/dev/null || true
+          sleep 0.3
+          echo "Done. Switch input source to reload VoiceInputIME."
+        name: Restart IME
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.voiceinput.inputmethod.VoiceInputIME
+        CONFIGURATION_BUILD_DIR: $(HOME)/Library/Input Methods
+        SKIP_INSTALL: YES
+        PRODUCT_NAME: VoiceInputIME
+        INFOPLIST_FILE: Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Entitlements.plist
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: AFP2R23LLD
+        CODE_SIGN_IDENTITY: 'Apple Development'
+        MACOSX_DEPLOYMENT_TARGET: '14.0'
+        SWIFT_VERSION: '5.9'
+        GENERATE_INFOPLIST_FILE: false
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/VoiceInputIME/SherpaOnnx-Bridging-Header.h
+
+    dependencies:
+      - framework: InputMethodKit.framework
+        embed: false
+      - framework: Carbon.framework
+        embed: false
+      - framework: Speech.framework
+        embed: false
+      - framework: AVFoundation.framework
+        embed: false
+      - sdk: libsqlite3.tbd

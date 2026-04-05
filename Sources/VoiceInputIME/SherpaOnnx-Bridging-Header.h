@@ -1,0 +1,5 @@
+// VoiceInputIME Bridging Header
+#ifndef VOICEINPUTIME_BRIDGING_HEADER_H_
+#define VOICEINPUTIME_BRIDGING_HEADER_H_
+
+#endif
