@@ -45,10 +45,7 @@ final class TextPostProcessor {
 
     func loadDictionary() {
         guard FileManager.default.fileExists(atPath: dictionaryURL.path) else {
-            let defaults: [String: String] = [
-                "BORUI": "borui",
-                "博瑞": "borui",
-            ]
+            let defaults: [String: String] = [:]
             saveDictionary(defaults)
             dictionary = defaults
             return
@@ -95,7 +92,7 @@ final class TextPostProcessor {
         // where <segment> is Chinese chars or Latin alphanumerics
         // and <sep> is a dot-synonym with optional surrounding whitespace
         //
-        // This correctly handles "AP dot博瑞dot CA", "ap.borui.ca",
+        // This correctly handles "example dot com", "example.com",
         // "AP DOT BORUI DOT CA", "AP点博瑞点CA", etc.
 
         let segmentPat = "(?:[A-Za-z0-9]+|[\\u4e00-\\u9fff]+)"
@@ -133,7 +130,7 @@ final class TextPostProcessor {
         return result
     }
 
-    /// Turn a matched candidate like "AP dot博瑞dot CA" into "ap.borui.ca"
+    /// Turn a matched candidate like "example dot com" into "example.com"
     private func normalizeDomainCandidate(_ text: String) -> String {
         var s = text
 
