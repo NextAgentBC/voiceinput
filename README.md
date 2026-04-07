@@ -1,82 +1,148 @@
-# Voice Input — Mac 语音输入工具
+# Voice Input 语音输入
 
-按住 Fn 键说话，松开自动输入文字。简单、快速、支持中英文。
+[English](#english) | [中文](#中文)
 
-## 安装
+---
 
-1. 下载 [VoiceInput-0.1.0.dmg](https://nextagent.ca/VoiceInput-0.1.0.dmg)
-2. 打开 DMG，将 **VoiceInput.app** 拖到 **Applications（应用程序）** 文件夹
-3. 双击打开 VoiceInput.app
-4. 首次打开会提示授权 **辅助功能** 权限 — 这是全局快捷键必需的：
+## 中文
+
+按住 Fn 键说话，松开自动输入文字到任何应用。简单、快速、支持中英文。
+
+### 安装
+
+1. 下载 [VoiceInput-0.1.0.dmg](https://github.com/NextAgentBC/voiceinput/releases/latest)
+2. 打开 DMG，将 **VoiceInput.app** 拖到 **应用程序** 文件夹
+3. 双击打开 VoiceInput
+4. 授权 **辅助功能** 权限（全局快捷键必需）：
    - 打开 **系统设置 → 隐私与安全 → 辅助功能**
-   - 点 **+**，找到 **VoiceInput.app** 添加并打开开关
+   - 点 **+**，添加 **VoiceInput.app** 并打开开关
+5. 菜单栏出现 🎤 图标 — 完成！
 
-<img width="400" alt="accessibility" src="https://help.apple.com/assets/67BA58080C06A05919043E35/67BA580A0C06A05919043E45/zh_CN/a2d0a1fe05544c2a83e3dd07a6eed52c.png">
-
-5. 菜单栏出现 🎤 图标 — 安装完成！
-
-## 使用
+### 使用方法
 
 | 操作 | 功能 |
 |------|------|
 | **按住 Fn** | 开始录音 |
-| **松开 Fn** | 停止录音，自动转写并输入到当前光标位置 |
+| **松开 Fn** | 停止录音，自动转写并输入 |
 | **Escape** | 取消录音 |
 | **Cmd+Z** | 撤销已输入的文字 |
 
-在任何 App 中都能使用 — Chrome、微信、Notes、VS Code 等。
+适用于任何应用 — 微信、Chrome、备忘录、VS Code 等。
 
-## 语音引擎
+### 语音引擎
 
-点击菜单栏 🎤 图标 → **Settings** 选择引擎：
+点击菜单栏 🎤 → **Settings** 选择引擎：
 
 | 引擎 | 说明 |
 |------|------|
-| **Apple (Local)** | 默认。免费、离线、无需配置 |
-| **Cloud API** | 自定义 STT 服务器，需填入 API 地址和 Key |
+| **Apple (本地)** | 默认。免费、离线、无需配置 |
+| **Cloud API** | 自定义 STT 服务器，需填 API 地址和 Key |
 | **Local Whisper** | 即将推出 |
 
-### 使用 Cloud API
+### 自动发送
 
-如果你有自己的 STT 服务器（如 Whisper API、Cohere Transcribe 等）：
-
+如果你在聊天应用（如微信）中使用，可以开启自动发送：
 1. 点击菜单栏 🎤 → **Settings**
-2. 选择 **Cloud API**
-3. 填入 **API Endpoint**（如 `https://your-server.com/v1/audio/transcriptions`）
-4. 填入 **API Key**
-5. 点 **Test Connection** 验证
+2. 勾选 **Auto Send**
+3. 选择发送快捷键：**Enter** 或 **Cmd+Enter**（需与你的聊天应用设置一致）
 
-API 需兼容 OpenAI Whisper 格式（multipart form，返回 `{"text": "..."}`）。
+### 系统要求
 
-## 系统要求
-
-- macOS 14.0 (Sonoma) 或更高版本
+- macOS 14.0 (Sonoma) 或更高
 - Apple Silicon 或 Intel Mac
 
-## 常见问题
+### 常见问题
 
 **Q: 按 Fn 没反应？**
-A: 检查辅助功能权限是否已授权（系统设置 → 隐私与安全 → 辅助功能）。如果从 DMG 重新安装了，需要重新授权。
+A: 请检查辅助功能权限（系统设置 → 隐私与安全 → 辅助功能）。重新安装后需要重新授权。
 
-**Q: Fn 键会触发表情符号选择器？**
-A: VoiceInput 会自动拦截 Fn 键。如果表情选择器仍然出现，请在系统设置 → 键盘中将 "按下 🌐 键时" 改为 "不执行任何操作"。
-
-**Q: 使用 Apple 引擎时首次录音很慢？**
-A: 首次使用需要下载 Apple 语音模型，之后会更快。
+**Q: Fn 触发了表情选择器？**
+A: 在系统设置 → 键盘中，将「按下 🌐 键时」改为「不执行任何操作」。
 
 **Q: 支持哪些语言？**
-A: Settings 中可选：简体中文、English、日本語、한국어。
+A: 简体中文、English、日本語、한국어。在 Settings 中切换。
 
-## 隐私
+### 隐私
 
-- **Apple (Local) 引擎**：所有语音数据在本地处理，不上传任何服务器
-- **Cloud API 引擎**：音频发送到你配置的服务器地址
+- **Apple 引擎**：所有数据在本地处理，不上传任何服务器
+- **Cloud API**：音频发送到你自己配置的服务器
 - VoiceInput 不收集任何用户数据
-
-## 开源
-
-[GitHub](https://github.com/user/voiceinput) · MIT License
 
 ---
 
-Made with ❤️ by NexAgent AI Solutions
+## English
+
+Hold the Fn key to speak, release to automatically type the transcription into any app. Simple, fast, supports Chinese and English.
+
+### Installation
+
+1. Download [VoiceInput-0.1.0.dmg](https://github.com/NextAgentBC/voiceinput/releases/latest)
+2. Open the DMG, drag **VoiceInput.app** to **Applications**
+3. Launch VoiceInput
+4. Grant **Accessibility** permission (required for global hotkey):
+   - Open **System Settings → Privacy & Security → Accessibility**
+   - Click **+**, add **VoiceInput.app** and enable the toggle
+5. A 🎤 icon appears in the menu bar — done!
+
+### Usage
+
+| Action | Function |
+|--------|----------|
+| **Hold Fn** | Start recording |
+| **Release Fn** | Stop recording, transcribe and paste |
+| **Escape** | Cancel recording |
+| **Cmd+Z** | Undo pasted text |
+
+Works in any app — WeChat, Chrome, Notes, VS Code, etc.
+
+### Speech Engines
+
+Click the 🎤 menu bar icon → **Settings** to choose:
+
+| Engine | Description |
+|--------|-------------|
+| **Apple (Local)** | Default. Free, offline, no setup needed |
+| **Cloud API** | Custom STT server (requires endpoint + API key) |
+| **Local Whisper** | Coming soon |
+
+### Auto Send
+
+For chat apps (e.g. WeChat), enable auto-send to press Enter after transcription:
+1. Click 🎤 → **Settings**
+2. Enable **Auto Send**
+3. Choose send key: **Enter** or **Cmd+Enter** (must match your chat app setting)
+
+### System Requirements
+
+- macOS 14.0 (Sonoma) or later
+- Apple Silicon or Intel Mac
+
+### FAQ
+
+**Q: Fn key doesn't work?**
+A: Check Accessibility permission (System Settings → Privacy & Security → Accessibility). Re-installation requires re-authorization.
+
+**Q: Fn triggers emoji picker?**
+A: In System Settings → Keyboard, change "Press 🌐 key to" to "Do Nothing".
+
+**Q: What languages are supported?**
+A: Simplified Chinese, English, Japanese, Korean. Switch in Settings.
+
+### Privacy
+
+- **Apple engine**: All data processed locally, nothing uploaded
+- **Cloud API**: Audio sent to your configured server only
+- VoiceInput collects no user data
+
+---
+
+## License
+
+MIT License
+
+## Links
+
+- [GitHub](https://github.com/NextAgentBC/voiceinput)
+- [Download](https://github.com/NextAgentBC/voiceinput/releases/latest)
+
+Made with ❤️ by [NexAgent AI Solutions](https://nextagent.ca)

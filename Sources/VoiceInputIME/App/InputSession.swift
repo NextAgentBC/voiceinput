@@ -192,18 +192,15 @@ final class RecordingSession {
 
     private func simulateSend() {
         let src = CGEventSource(stateID: .hidSystemState)
-        let cmd = isFrontAppWeChat()
+        let useCmd = settings.sendKey == .cmdEnter
         if let d = CGEvent(keyboardEventSource: src, virtualKey: 0x24, keyDown: true) {
-            if cmd { d.flags = .maskCommand }; d.post(tap: .cghidEventTap)
+            if useCmd { d.flags = .maskCommand }
+            d.post(tap: .cghidEventTap)
         }
         if let u = CGEvent(keyboardEventSource: src, virtualKey: 0x24, keyDown: false) {
-            if cmd { u.flags = .maskCommand }; u.post(tap: .cghidEventTap)
+            if useCmd { u.flags = .maskCommand }
+            u.post(tap: .cghidEventTap)
         }
-    }
-
-    private func isFrontAppWeChat() -> Bool {
-        let id = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
-        return id.contains("com.tencent.xinWeChat") || id.contains("com.tencent.WeWorkMac")
     }
 
     // MARK: - Audio Level

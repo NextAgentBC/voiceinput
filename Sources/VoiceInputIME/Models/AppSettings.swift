@@ -44,6 +44,10 @@ final class AppSettings: NSObject, ObservableObject {
         didSet { UserDefaults.standard.set(autoSend, forKey: "autoSend") }
     }
 
+    @Published var sendKey: SendKeyType {
+        didSet { UserDefaults.standard.set(sendKey.rawValue, forKey: "sendKey") }
+    }
+
     // MARK: - Constants
     static let supportedLanguages: [(code: String, name: String)] = [
         ("zh", "简体中文"),
@@ -72,6 +76,7 @@ final class AppSettings: NSObject, ObservableObject {
         self.sttAPIKey = d.string(forKey: "sttAPIKey") ?? ""
         self.selectedLanguage = d.string(forKey: "selectedLanguage") ?? "zh"
         self.autoSend = d.object(forKey: "autoSend") == nil ? false : d.bool(forKey: "autoSend")
+        self.sendKey = SendKeyType(rawValue: d.string(forKey: "sendKey") ?? "") ?? .enter
         self.llmEnabled = d.bool(forKey: "llmEnabled")
         self.llmBaseURL = d.string(forKey: "llmBaseURL") ?? ""
         self.llmAPIKey = d.string(forKey: "llmAPIKey") ?? ""

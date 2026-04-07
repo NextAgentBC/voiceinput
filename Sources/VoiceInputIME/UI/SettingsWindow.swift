@@ -101,8 +101,26 @@ struct SettingsView: View {
 
                 // Behavior
                 GroupBox(label: Label("Behavior", systemImage: "gear")) {
-                    Toggle("Auto Send (press Enter after paste)", isOn: $settings.autoSend)
-                        .padding(8)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Auto Send after transcription", isOn: $settings.autoSend)
+                        if settings.autoSend {
+                            HStack {
+                                Text("Send Key")
+                                    .frame(width: 80, alignment: .trailing)
+                                Picker("", selection: $settings.sendKey) {
+                                    ForEach(SendKeyType.allCases, id: \.self) { key in
+                                        Text(key.displayName).tag(key)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 200)
+                            }
+                            Text("Match your chat app's send shortcut (e.g. WeChat uses Enter or Cmd+Enter)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(8)
                 }
 
                 // LLM

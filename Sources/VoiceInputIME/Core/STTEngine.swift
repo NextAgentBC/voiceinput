@@ -7,6 +7,18 @@ protocol STTEngine: AnyObject {
     func stopRecording(context: String) async -> String
 }
 
+enum SendKeyType: String, CaseIterable {
+    case enter = "enter"
+    case cmdEnter = "cmdEnter"
+
+    var displayName: String {
+        switch self {
+        case .enter: return "Enter"
+        case .cmdEnter: return "Cmd+Enter"
+        }
+    }
+}
+
 enum STTEngineType: String, CaseIterable {
     case apple = "apple"
     case cloud = "cloud"
