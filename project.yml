@@ -1,4 +1,4 @@
-name: VoiceInputIME
+name: VoiceInput
 options:
   bundleIdPrefix: com.voiceinput
   deploymentTarget:
@@ -6,12 +6,14 @@ options:
   xcodeVersion: '16.0'
 
 targets:
-  VoiceInputIME:
+  VoiceInput:
     type: application
     platform: macOS
 
     sources:
       - path: Sources/VoiceInputIME
+        excludes:
+          - IMK  # No longer used
       - path: Resources
         excludes:
           - Info.plist
@@ -20,34 +22,30 @@ targets:
 
     postBuildScripts:
       - script: |
-          pkill -9 -f VoiceInputIME 2>/dev/null || true
-          sleep 0.3
-          echo "Done. Switch input source to reload VoiceInputIME."
-        name: Restart IME
+          pkill -9 -f VoiceInput 2>/dev/null || true
+          echo "Done. Launch VoiceInput.app to test."
+        name: Restart App
+        basedOnDependencyAnalysis: false
 
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.voiceinput.inputmethod.VoiceInputIME
-        CONFIGURATION_BUILD_DIR: $(HOME)/Library/Input Methods
-        SKIP_INSTALL: YES
-        PRODUCT_NAME: VoiceInputIME
+        PRODUCT_BUNDLE_IDENTIFIER: com.voiceinput.app
+        PRODUCT_NAME: VoiceInput
         INFOPLIST_FILE: Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: Entitlements.plist
-        CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: AFP2R23LLD
-        CODE_SIGN_IDENTITY: 'Apple Development'
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: JPY8GAYHAP
+        CODE_SIGN_IDENTITY: 'Apple Development: it@mmcwellness.ca (AFP2R23LLD)'
         MACOSX_DEPLOYMENT_TARGET: '14.0'
         SWIFT_VERSION: '5.9'
         GENERATE_INFOPLIST_FILE: false
         SWIFT_OBJC_BRIDGING_HEADER: Sources/VoiceInputIME/SherpaOnnx-Bridging-Header.h
 
     dependencies:
-      - framework: InputMethodKit.framework
-        embed: false
       - framework: Carbon.framework
         embed: false
-      - framework: Speech.framework
-        embed: false
       - framework: AVFoundation.framework
+        embed: false
+      - framework: Speech.framework
         embed: false
       - sdk: libsqlite3.tbd

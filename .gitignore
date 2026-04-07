@@ -1,0 +1,15 @@
+# Xcode
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+build/
+
+# macOS
+.DS_Store
+*.swp
+
+# Frameworks (large binary, users build locally)
+Frameworks/
+
+# Debug logs
+*.log

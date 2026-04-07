@@ -1,253 +1,203 @@
 import Cocoa
-import InputMethodKit
+import Carbon
 
-/// One InputSession per client app. Manages voice recording state and text commitment.
-final class InputSession {
-    // MARK: - Session Cache
-    private static var sessions = NSMapTable<AnyObject, InputSession>.weakToStrongObjects()
+/// Singleton recording session with pluggable STT engine.
+final class RecordingSession {
+    static let shared = RecordingSession()
 
-    static func session(for client: any IMKTextInput) -> InputSession {
-        let key = client as AnyObject
-        if let existing = sessions.object(forKey: key) { return existing }
-        let session = InputSession()
-        sessions.setObject(session, forKey: key)
-        return session
+    // MARK: - Engines (lazy-initialized)
+    private lazy var appleEngine: STTEngine = AppleSpeechEngine()
+    private lazy var cloudEngine: STTEngine = CloudSTTEngine()
+    private lazy var whisperEngine: STTEngine = WhisperEngine()
+
+    private var currentEngine: STTEngine {
+        switch AppSettings.shared.sttEngineType {
+        case .apple: return appleEngine
+        case .cloud: return cloudEngine
+        case .whisper: return whisperEngine
+        }
     }
 
-    // MARK: - Shared Components
-    private static let recognizer = APIRecognizer()
-    private static let audioLevelProvider = AudioLevelProvider()
-    private static let textPostProcessor = TextPostProcessor()
-    private static let llmRefiner = LLMRefiner()
-    private static let vocabDB = VocabularyDB.shared
-    private static let floatingPanel = FloatingPanel()
+    // MARK: - Components
+    private let audioLevelProvider = AudioLevelProvider()
+    private let textPostProcessor = TextPostProcessor()
+    private let llmRefiner = LLMRefiner()
+    private let vocabDB = VocabularyDB.shared
+    private let floatingPanel = FloatingPanel()
 
     private var settings: AppSettings { AppSettings.shared }
 
     // MARK: - State
     private var state: RecognitionState = .idle
-    private var optionDown = false
-    private var optionDownTime: TimeInterval = 0
-    private var holdFired = false
-    private let tapThreshold: TimeInterval = 0.3
-
-    // Silence detection
-    private let silenceThreshold: Float = 0.02
-    private let silenceTimeout: TimeInterval = 3.0
-    private var silenceTimer: Timer?
-    private var lastSpeechTime: TimeInterval = 0
-
-    private weak var activeClient: (any IMKTextInput)?
-
-    // Track the active transcription task so cancel can abort it
     private var activeTask: Task<Void, Never>?
 
-    // Rolling context buffer: last ~500 chars of committed text for STT prompt + LLM
-    private var contextBuffer = ""
-    private let maxContextLength = 500
+    private init() {}
 
-    private func addContext(_ text: String) {
-        contextBuffer += text + " "
-        if contextBuffer.count > maxContextLength {
-            contextBuffer = String(contextBuffer.suffix(maxContextLength))
-        }
-    }
+    // MARK: - Public API
 
-    // MARK: - Event Handling
-
-    func handleEvent(_ event: NSEvent, client: any IMKTextInput) -> Bool {
-        // Escape cancels recording or pending transcription
-        if event.type == .keyDown && event.keyCode == 53 {
-            if state.isRecording || state.isRefining {
-                cancelComposition(client: client)
-                return true
-            }
-        }
-
-        // Option key → voice
-        if event.type == .flagsChanged {
-            let kc = event.keyCode
-            if kc == 58 || kc == 61 {
-                return handleOptionKey(event: event, client: client)
-            }
-            return false
-        }
-
-        // Swallow keys while recording or refining
-        if state.isRecording || state.isRefining { return true }
-
-        return false
-    }
-
-    // MARK: - Option Key
-
-    private func handleOptionKey(event: NSEvent, client: any IMKTextInput) -> Bool {
-        let isDown = event.modifierFlags.contains(.option)
-
-        if isDown && !optionDown {
-            optionDown = true
-            optionDownTime = ProcessInfo.processInfo.systemUptime
-            // Start recording immediately on press
-            startRecording(client: client, mode: .hold)
-            return true
-
-        } else if !isDown && optionDown {
-            optionDown = false
-            let duration = ProcessInfo.processInfo.systemUptime - optionDownTime
-
-            if duration < tapThreshold {
-                // Quick tap: cancel hold recording, toggle continuous instead
-                cancelRecording()
-                if state.isIdle {
-                    startRecording(client: client, mode: .continuous)
-                }
-            } else {
-                // Hold release: finish and send
-                finishRecording(client: client)
-            }
-            return true
-        }
-
-        return false
-    }
-
-    // MARK: - Composition
-
-    func composedString() -> String { state.displayText }
-
-    func commitComposition(client: any IMKTextInput) {
-        if case .recording(let text, _) = state, !text.isEmpty {
-            client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
-        }
-        cancelRecording()
-    }
-
-    func cancelComposition(client: any IMKTextInput) {
-        cancelRecording()
-        client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0),
-                             replacementRange: NSRange(location: NSNotFound, length: 0))
-    }
-
-    // MARK: - Recording
-
-    private func handleTap(client: any IMKTextInput) {
-        if state.isRecording { finishRecording(client: client) }
-        else if state.isIdle { startRecording(client: client, mode: .continuous) }
-    }
-
-    private func startRecording(client: any IMKTextInput, mode: InputMode) {
+    func startRecording() {
         guard state.isIdle else { return }
+        NSLog("[Recording] START (engine: %@)", settings.sttEngineType.rawValue)
 
-        activeClient = client
-        state = .recording(partialText: "", mode: mode)
-        Self.audioLevelProvider.reset()
-        lastSpeechTime = ProcessInfo.processInfo.systemUptime
+        state = .recording
+        floatingPanel.updateContent(audioLevel: 0)
+        floatingPanel.showWithAnimation()
 
-        Self.floatingPanel.updateContent(text: "🎤", audioLevel: 0, isContinuousMode: mode == .continuous)
-        Self.floatingPanel.showWithAnimation()
-
-        if mode == .continuous { startSilenceDetection() }
-
-        Self.recognizer.onAudioLevel = { [weak self] level in
+        var engine = currentEngine
+        engine.onAudioLevel = { [weak self] level in
             self?.handleAudioLevel(level)
         }
 
         do {
-            try Self.recognizer.startRecording()
+            try engine.startRecording(language: settings.selectedLanguage)
         } catch {
-            NSLog("[InputSession] Failed to start recording: %@", "\(error)")
-            stopSilenceDetection()
+            NSLog("[Recording] Failed to start: %@", "\(error)")
             state = .idle
-            Self.floatingPanel.hideWithAnimation()
+            floatingPanel.hideWithAnimation()
         }
     }
 
-    private func finishRecording(client: any IMKTextInput) {
+    func stopRecording() {
         guard state.isRecording else { return }
+        NSLog("[Recording] STOP")
 
-        stopSilenceDetection()
-        state = .refining(text: "")
-        Self.floatingPanel.updateContent(text: "", audioLevel: 0, isRefining: true)
+        state = .refining
+        floatingPanel.updateContent(audioLevel: 0, isRefining: true)
 
-        // Capture client strongly for the async task
-        let capturedClient = client
+        let engine = currentEngine
 
         activeTask = Task { [weak self] in
             guard let self = self else { return }
 
-            let rawText = await Self.recognizer.stopRecording(context: self.contextBuffer)
+            do {
+                let rawText = await engine.stopRecording(context: "")
 
-            // If cancelled (state changed to idle) while waiting, bail out
-            guard !Task.isCancelled, self.state.isRefining else {
-                NSLog("[InputSession] Task cancelled after STT")
-                return
-            }
+                guard !Task.isCancelled, self.state.isRefining else { return }
 
-            guard !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                guard !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    await MainActor.run {
+                        self.state = .idle
+                        self.floatingPanel.hideWithAnimation()
+                    }
+                    return
+                }
+
+                // Post-processing pipeline
+                let (vocabCorrected, applied) = self.vocabDB.applyCorrections(rawText)
+                for (orig, corr) in applied {
+                    self.vocabDB.learn(original: orig, corrected: corr, source: "usage")
+                }
+
+                let processed = self.textPostProcessor.process(vocabCorrected)
+
+                // Optional LLM refinement
+                let refined = await self.llmRefiner.refine(text: processed, context: "", settings: self.settings)
+                guard !Task.isCancelled, self.state.isRefining else { return }
+
+                if refined != processed {
+                    self.vocabDB.learnFromDiff(original: rawText, corrected: refined, source: "ai")
+                }
+
+                await MainActor.run {
+                    self.commitText(refined)
+                }
+            } catch {
+                NSLog("[Recording] Error: %@", "\(error)")
                 await MainActor.run {
                     self.state = .idle
-                    Self.floatingPanel.hideWithAnimation()
-                    capturedClient.setMarkedText("",
-                        selectionRange: NSRange(location: 0, length: 0),
-                        replacementRange: NSRange(location: NSNotFound, length: 0))
+                    self.floatingPanel.hideWithAnimation()
                 }
-                return
-            }
-
-            // Vocab corrections
-            let (vocabCorrected, applied) = Self.vocabDB.applyCorrections(rawText)
-            for (orig, corr) in applied {
-                Self.vocabDB.learn(original: orig, corrected: corr, source: "usage")
-            }
-
-            let processed = Self.textPostProcessor.process(vocabCorrected)
-
-            let refined = await Self.llmRefiner.refine(text: processed, context: self.contextBuffer, settings: self.settings)
-            guard !Task.isCancelled, self.state.isRefining else { return }
-            if refined != processed {
-                Self.vocabDB.learnFromDiff(original: rawText, corrected: refined, source: "ai")
-            }
-            await MainActor.run {
-                self.addContext(refined)
-                self.commitText(refined, client: capturedClient)
             }
         }
     }
 
-    private func commitText(_ text: String, client: any IMKTextInput) {
-        guard state.isRefining else { return }  // Guard against stale commits
-        client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0),
-                             replacementRange: NSRange(location: NSNotFound, length: 0))
-        client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
-        state = .idle
-        Self.floatingPanel.hideWithAnimation()
-
-        if settings.autoSend {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.simulateSend() }
-        }
-    }
-
-    private func cancelRecording() {
-        stopSilenceDetection()
+    func cancelRecording() {
         activeTask?.cancel()
         activeTask = nil
-        Task { _ = await Self.recognizer.stopRecording() }
+        Task { _ = await currentEngine.stopRecording(context: "") }
         state = .idle
-        Self.floatingPanel.hideWithAnimation()
+        floatingPanel.hideWithAnimation()
+    }
+
+    // MARK: - Text Injection
+
+    private func commitText(_ text: String) {
+        guard state.isRefining else { return }
+        NSLog("[Recording] Commit: \"%@\"", text)
+
+        state = .idle
+        floatingPanel.hideWithAnimation()
+        injectText(text)
+
+        if settings.autoSend {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.simulateSend() }
+        }
+    }
+
+    private func injectText(_ text: String) {
+        let pb = NSPasteboard.general
+        let saved = pb.string(forType: .string)
+
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+
+        // CJK input source handling
+        let originalSource = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
+        let needSwitch = !isASCIICapable(originalSource)
+
+        if needSwitch, let ascii = findASCIICapableSource() {
+            TISSelectInputSource(ascii)
+            usleep(50_000)
+        }
+
+        // Cmd+V paste
+        usleep(50_000)
+        let src = CGEventSource(stateID: .combinedSessionState)
+        if let d = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: true) {
+            d.flags = .maskCommand; d.post(tap: .cgAnnotatedSessionEventTap)
+        }
+        if let u = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: false) {
+            u.flags = .maskCommand; u.post(tap: .cgAnnotatedSessionEventTap)
+        }
+
+        if needSwitch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { TISSelectInputSource(originalSource) }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            pb.clearContents()
+            if let s = saved { pb.setString(s, forType: .string) }
+        }
+    }
+
+    // MARK: - CJK Helpers
+
+    private func isASCIICapable(_ source: TISInputSource) -> Bool {
+        guard let ptr = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsASCIICapable) else { return false }
+        return CFBooleanGetValue(Unmanaged<CFBoolean>.fromOpaque(ptr).takeUnretainedValue())
+    }
+
+    private func findASCIICapableSource() -> TISInputSource? {
+        let criteria = [kTISPropertyInputSourceIsASCIICapable: true, kTISPropertyInputSourceIsEnabled: true] as CFDictionary
+        guard let list = TISCreateInputSourceList(criteria, false)?.takeRetainedValue() as? [TISInputSource] else { return nil }
+        for s in list {
+            if let p = TISGetInputSourceProperty(s, kTISPropertyInputSourceID) {
+                let id = Unmanaged<CFString>.fromOpaque(p).takeUnretainedValue() as String
+                if id == "com.apple.keylayout.ABC" || id == "com.apple.keylayout.US" { return s }
+            }
+        }
+        return list.first
     }
 
     // MARK: - Auto-Send
 
     private func simulateSend() {
-        let source = CGEventSource(stateID: .hidSystemState)
-        let needsCmd = isFrontAppWeChat()
-        if let down = CGEvent(keyboardEventSource: source, virtualKey: 0x24, keyDown: true) {
-            if needsCmd { down.flags = .maskCommand }
-            down.post(tap: .cghidEventTap)
+        let src = CGEventSource(stateID: .hidSystemState)
+        let cmd = isFrontAppWeChat()
+        if let d = CGEvent(keyboardEventSource: src, virtualKey: 0x24, keyDown: true) {
+            if cmd { d.flags = .maskCommand }; d.post(tap: .cghidEventTap)
         }
-        if let up = CGEvent(keyboardEventSource: source, virtualKey: 0x24, keyDown: false) {
-            if needsCmd { up.flags = .maskCommand }
-            up.post(tap: .cghidEventTap)
+        if let u = CGEvent(keyboardEventSource: src, virtualKey: 0x24, keyDown: false) {
+            if cmd { u.flags = .maskCommand }; u.post(tap: .cghidEventTap)
         }
     }
 
@@ -256,41 +206,12 @@ final class InputSession {
         return id.contains("com.tencent.xinWeChat") || id.contains("com.tencent.WeWorkMac")
     }
 
-    // MARK: - Silence Detection
-
-    private func startSilenceDetection() {
-        stopSilenceDetection()
-        lastSpeechTime = ProcessInfo.processInfo.systemUptime
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.checkSilence()
-        }
-    }
-
-    private func stopSilenceDetection() {
-        silenceTimer?.invalidate()
-        silenceTimer = nil
-    }
-
-    private func checkSilence() {
-        guard case .recording(let text, .continuous) = state else { stopSilenceDetection(); return }
-        if ProcessInfo.processInfo.systemUptime - lastSpeechTime >= silenceTimeout
-            && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if let client = activeClient { finishRecording(client: client) }
-        }
-    }
-
     // MARK: - Audio Level
 
     private func handleAudioLevel(_ level: Float) {
-        Self.audioLevelProvider.update(rawLevel: level)
-        if level > silenceThreshold { lastSpeechTime = ProcessInfo.processInfo.systemUptime }
-
-        if case .recording(_, let mode) = state {
-            Self.floatingPanel.updateContent(
-                text: "🎤",
-                audioLevel: Self.audioLevelProvider.smoothedLevel,
-                isContinuousMode: mode == .continuous
-            )
+        audioLevelProvider.update(rawLevel: level)
+        if state.isRecording {
+            floatingPanel.updateContent(audioLevel: audioLevelProvider.smoothedLevel)
         }
     }
 }

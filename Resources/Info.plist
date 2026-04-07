@@ -3,71 +3,34 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>VoiceInputIME</string>
-    <key>CFBundleDisplayName</key>
     <string>VoiceInput</string>
+    <key>CFBundleDisplayName</key>
+    <string>Voice Input</string>
     <key>CFBundleIdentifier</key>
-    <string>com.voiceinput.inputmethod.VoiceInputIME</string>
+    <string>com.voiceinput.app</string>
     <key>CFBundleVersion</key>
-    <string>1.0</string>
+    <string>1</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>0.1.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
-    <string>VoiceInputIME</string>
+    <string>VoiceInput</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>LSUIElement</key>
     <true/>
-    <key>LSBackgroundOnly</key>
-    <false/>
-    <key>tsInputMethodCharacterRepertoireKey</key>
-    <array>
-        <string>Latn</string>
-        <string>zh-Hans</string>
-    </array>
-    <key>InputMethodConnectionName</key>
-    <string>com.voiceinput.inputmethod.VoiceInputIME_Connection</string>
-    <key>InputMethodServerControllerClass</key>
-    <string>VoiceInputIME.VoiceInputController</string>
-    <key>ComponentInputModeDict</key>
+    <key>NSAppTransportSecurity</key>
     <dict>
-        <key>tsInputModeListKey</key>
-        <dict>
-            <key>com.voiceinput.inputmethod.VoiceInputIME.voice</key>
-            <dict>
-                <key>TISInputSourceID</key>
-                <string>com.voiceinput.inputmethod.VoiceInputIME.voice</string>
-                <key>tsInputModeDefaultStateKey</key>
-                <false/>
-                <key>tsInputModeIsVisibleKey</key>
-                <true/>
-                <key>tsInputModeMenuIconFileKey</key>
-                <string>mic</string>
-                <key>tsInputModeAlternateMenuIconFileKey</key>
-                <string>mic</string>
-                <key>tsInputModePrimaryInScriptKey</key>
-                <true/>
-                <key>tsInputModeScriptKey</key>
-                <string>smSimpChinese</string>
-                <key>tsInputModeKeyEquivalentKey</key>
-                <string></string>
-                <key>tsInputModeKeyEquivalentModifiersKey</key>
-                <integer>4608</integer>
-            </dict>
-        </dict>
-        <key>tsVisibleInputModeOrderedArrayKey</key>
-        <array>
-            <string>com.voiceinput.inputmethod.VoiceInputIME.voice</string>
-        </array>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
     </dict>
     <key>NSMicrophoneUsageDescription</key>
-    <string>VoiceInputIME needs microphone access for voice input.</string>
+    <string>Voice Input needs microphone access to record your speech for transcription.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>VoiceInputIME uses speech recognition to convert voice to text.</string>
+    <string>Voice Input uses speech recognition to convert your voice to text.</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
 </dict>

@@ -3,148 +3,74 @@ import SwiftUI
 
 final class FloatingPanel: NSPanel {
     private var hostingView: NSHostingView<FloatingContentView>?
-    private var visualEffectView: NSVisualEffectView?
+    private let panelSize: CGFloat = 60
 
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 200, height: 56),
+            contentRect: NSRect(x: 0, y: 0, width: 60, height: 60),
             styleMask: [.nonactivatingPanel, .fullSizeContentView, .borderless],
             backing: .buffered,
             defer: true
         )
-
         level = .floating
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        hasShadow = false
         isMovableByWindowBackground = false
         hidesOnDeactivate = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         animationBehavior = .utilityWindow
-
-        setupVisualEffectView()
-        setupHostingView(text: "", audioLevel: 0, isRefining: false, isContinuousMode: false)
     }
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
-    private func setupVisualEffectView() {
-        let effectView = NSVisualEffectView()
-        effectView.material = .hudWindow
-        effectView.blendingMode = .behindWindow
-        effectView.state = .active
-        effectView.wantsLayer = true
-        effectView.layer?.cornerRadius = 28
-        effectView.layer?.masksToBounds = true
-
-        contentView = effectView
-        self.visualEffectView = effectView
-    }
-
-    private func setupHostingView(text: String, audioLevel: Float, isRefining: Bool, isContinuousMode: Bool) {
-        let swiftUIView = FloatingContentView(
-            text: text,
-            audioLevel: audioLevel,
-            isRefining: isRefining,
-            isContinuousMode: isContinuousMode
-        )
-        let hosting = NSHostingView(rootView: swiftUIView)
+    func updateContent(audioLevel: Float, isRefining: Bool = false) {
+        let view = FloatingContentView(audioLevel: audioLevel, isRefining: isRefining)
+        let hosting = NSHostingView(rootView: view)
         hosting.translatesAutoresizingMaskIntoConstraints = false
 
-        if let effectView = visualEffectView {
-            // Remove old hosting view if exists
-            hostingView?.removeFromSuperview()
-
-            effectView.addSubview(hosting)
+        hostingView?.removeFromSuperview()
+        contentView?.addSubview(hosting)
+        if let cv = contentView {
             NSLayoutConstraint.activate([
-                hosting.topAnchor.constraint(equalTo: effectView.topAnchor),
-                hosting.bottomAnchor.constraint(equalTo: effectView.bottomAnchor),
-                hosting.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
-                hosting.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
+                hosting.centerXAnchor.constraint(equalTo: cv.centerXAnchor),
+                hosting.centerYAnchor.constraint(equalTo: cv.centerYAnchor),
+                hosting.widthAnchor.constraint(equalToConstant: panelSize),
+                hosting.heightAnchor.constraint(equalToConstant: panelSize),
             ])
         }
-
         self.hostingView = hosting
     }
 
-    func updateContent(text: String, audioLevel: Float, isRefining: Bool = false, isContinuousMode: Bool = false) {
-        setupHostingView(text: text, audioLevel: audioLevel, isRefining: isRefining, isContinuousMode: isContinuousMode)
-
-        // Resize panel based on content
-        let contentWidth = calculateWidth(for: text, isRefining: isRefining, isContinuousMode: isContinuousMode)
-        let newFrame = centeredFrame(width: contentWidth)
-        setFrame(newFrame, display: true, animate: false)
-    }
-
     func showWithAnimation() {
-        let width = calculateWidth(for: "", isRefining: false)
-        let frame = centeredFrame(width: width)
+        let frame = centeredFrame()
         setFrame(frame, display: true)
-
         alphaValue = 0
-        setFrame(
-            NSRect(
-                x: frame.origin.x,
-                y: frame.origin.y - 20,
-                width: frame.width,
-                height: frame.height
-            ),
-            display: true
-        )
-
         orderFrontRegardless()
-
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.35
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            context.allowsImplicitAnimation = true
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.2
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             self.animator().alphaValue = 1.0
-            self.animator().setFrame(frame, display: true)
         })
     }
 
-    func hideWithAnimation(completion: (() -> Void)? = nil) {
-        let currentFrame = frame
-
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.22
-            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            context.allowsImplicitAnimation = true
-
-            // Scale down + fade out
-            let scaledFrame = NSRect(
-                x: currentFrame.origin.x + currentFrame.width * 0.1,
-                y: currentFrame.origin.y + currentFrame.height * 0.1,
-                width: currentFrame.width * 0.8,
-                height: currentFrame.height * 0.8
-            )
-            self.animator().setFrame(scaledFrame, display: true)
+    func hideWithAnimation() {
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.15
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
             self.animator().alphaValue = 0
         }, completionHandler: {
             self.orderOut(nil)
             self.alphaValue = 1.0
-            completion?()
         })
     }
 
-    private func calculateWidth(for text: String, isRefining: Bool, isContinuousMode: Bool = false) -> CGFloat {
-        let displayText = isRefining ? "Refining..." : (text.isEmpty ? "Listening..." : text)
-        let estimatedTextWidth = CGFloat(displayText.count) * 14
-        let badgeWidth: CGFloat = isContinuousMode ? 50 : 0
-        let contentWidth = estimatedTextWidth + 44 + 12 + 40 + badgeWidth
-        return min(max(contentWidth, 160), 560)
-    }
-
-    private func centeredFrame(width: CGFloat) -> NSRect {
+    private func centeredFrame() -> NSRect {
         guard let screen = NSScreen.main else {
-            return NSRect(x: 0, y: 80, width: width, height: 56)
+            return NSRect(x: 0, y: 100, width: panelSize, height: panelSize)
         }
-
-        let screenFrame = screen.visibleFrame
-        let x = screenFrame.origin.x + (screenFrame.width - width) / 2
-        let y = screenFrame.origin.y + 80
-
-        return NSRect(x: x, y: y, width: width, height: 56)
+        let sf = screen.visibleFrame
+        return NSRect(x: sf.midX - panelSize / 2, y: sf.minY + 100, width: panelSize, height: panelSize)
     }
 }

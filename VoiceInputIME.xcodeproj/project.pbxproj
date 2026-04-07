@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		018A4D2354202E6E2A194DFD /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EE31BD42AD6BD8E92D10E336 /* Carbon.framework */; };
+		0315E9F3AE8769C7D7458457 /* GlobalHotkey.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7BFBEA71EA5C0C1CDC7E3A6 /* GlobalHotkey.swift */; };
 		10C2F3002C9B32E98424E7A5 /* InputSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A5E608BB75D708F1BBACFE6 /* InputSession.swift */; };
 		1CF863726C3974572AA8FA26 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D6D877F661D5874AB82F917 /* main.swift */; };
 		27585B2AA59039AE59624C2C /* LLMRefiner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A235FAAEAFEEFF542B8EAC4 /* LLMRefiner.swift */; };
@@ -18,9 +19,12 @@
 		6324365C4FE7C69D1CF06ABF /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71C56761AEC1E965CEC315A1 /* WaveformView.swift */; };
 		64D8580E93B9DDC123415035 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12BAB22F0B05016ECD64D96E /* SpeechRecognizer.swift */; };
 		7B7069730AE5E3A5438A6D32 /* TextPostProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA22F7395715383C1E0468C4 /* TextPostProcessor.swift */; };
+		7FA98705816B315E5B4B85FA /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71F13862B4C91EF8F01239EB /* SettingsWindow.swift */; };
 		89423AC705ED5B8FA77D0A28 /* mic@2x.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 8F046CD214A902E22762E849 /* mic@2x.tiff */; };
 		94DC524C0700956CF656BFF3 /* mic.png in Resources */ = {isa = PBXBuildFile; fileRef = C2537C569613A96E32B5C837 /* mic.png */; };
 		9B821AE42596AA49169DB5DB /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AAC7D02055723FF89AA5644 /* AppSettings.swift */; };
+		B5BDE72D893F40C25FF1FB48 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = E707F2E9A4290D30B47CCE4E /* InfoPlist.strings */; };
+		BFEF3D0C4D0477BA47035970 /* micTemplate.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 27CC5EC969A60B82D7EF82E8 /* micTemplate.tiff */; };
 		C3F0026E4C6E6371C1A59A12 /* APIRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9A14DEC18B91AA8083E7721 /* APIRecognizer.swift */; };
 		C41201FF044EDE200C95496F /* RecognitionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFA3E0DBBF44E4EE74912FA5 /* RecognitionState.swift */; };
 		C697AF613136BF1316F7F8A5 /* VoiceInputController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B468460625C1869D62E14F28 /* VoiceInputController.swift */; };
@@ -30,6 +34,8 @@
 		E418930FE4CE5781303BB462 /* CandidatePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08F852709796D4ACF7B3D1CE /* CandidatePanel.swift */; };
 		E6F0B3EE23E2A883063FC14D /* Speech.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 28D1D26896AD616366B1A5D6 /* Speech.framework */; };
 		F44C6A771D4CD14BCB488473 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 08725354BF84495CFB2C1C44 /* AVFoundation.framework */; };
+		F7088F0867FCEA9E0DC0E9CA /* micTemplate@2x.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 7E314E1B40D267796F3DDD0E /* micTemplate@2x.tiff */; };
+		FAE197BBF96818D390EECDCF /* micTemplate.png in Resources */ = {isa = PBXBuildFile; fileRef = FD263D25355A394E77259B59 /* micTemplate.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,12 +47,17 @@
 		12BAB22F0B05016ECD64D96E /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		17CCE5FE62264B4199AB6D21 /* SherpaOnnx-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "SherpaOnnx-Bridging-Header.h"; sourceTree = "<group>"; };
 		1D6D877F661D5874AB82F917 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		21A1DF44A963AC537D3D0998 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		27CC5EC969A60B82D7EF82E8 /* micTemplate.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; path = micTemplate.tiff; sourceTree = "<group>"; };
 		28D1D26896AD616366B1A5D6 /* Speech.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = Speech.framework; sourceTree = "<group>"; };
 		3AAC7D02055723FF89AA5644 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		47C79B0DBCBF3A52CC52893C /* VoiceInputIME.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VoiceInputIME.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		47CCF07A23551200E904F04E /* FloatingContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingContentView.swift; sourceTree = "<group>"; };
 		5E1F4CE8FB7AF4A563BA58F4 /* VocabularyDB.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VocabularyDB.swift; sourceTree = "<group>"; };
 		71C56761AEC1E965CEC315A1 /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
+		71F13862B4C91EF8F01239EB /* SettingsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindow.swift; sourceTree = "<group>"; };
+		75714674649DC579EBDC584D /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		7E314E1B40D267796F3DDD0E /* micTemplate@2x.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; path = "micTemplate@2x.tiff"; sourceTree = "<group>"; };
 		83131DD91A82551DD5B5F3DE /* mic.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; path = mic.tiff; sourceTree = "<group>"; };
 		87AF8B757D0CB7DC3FF7B0F8 /* FloatingPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanel.swift; sourceTree = "<group>"; };
 		8F046CD214A902E22762E849 /* mic@2x.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; path = "mic@2x.tiff"; sourceTree = "<group>"; };
@@ -57,7 +68,9 @@
 		BFA3E0DBBF44E4EE74912FA5 /* RecognitionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecognitionState.swift; sourceTree = "<group>"; };
 		C2537C569613A96E32B5C837 /* mic.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = mic.png; sourceTree = "<group>"; };
 		CA22F7395715383C1E0468C4 /* TextPostProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextPostProcessor.swift; sourceTree = "<group>"; };
+		D7BFBEA71EA5C0C1CDC7E3A6 /* GlobalHotkey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkey.swift; sourceTree = "<group>"; };
 		EE31BD42AD6BD8E92D10E336 /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = Carbon.framework; sourceTree = "<group>"; };
+		FD263D25355A394E77259B59 /* micTemplate.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = micTemplate.png; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -79,6 +92,7 @@
 		08037566101251BD7376E17D /* App */ = {
 			isa = PBXGroup;
 			children = (
+				D7BFBEA71EA5C0C1CDC7E3A6 /* GlobalHotkey.swift */,
 				0A5E608BB75D708F1BBACFE6 /* InputSession.swift */,
 				1D6D877F661D5874AB82F917 /* main.swift */,
 			);
@@ -91,6 +105,7 @@
 				08F852709796D4ACF7B3D1CE /* CandidatePanel.swift */,
 				47CCF07A23551200E904F04E /* FloatingContentView.swift */,
 				87AF8B757D0CB7DC3FF7B0F8 /* FloatingPanel.swift */,
+				71F13862B4C91EF8F01239EB /* SettingsWindow.swift */,
 				71C56761AEC1E965CEC315A1 /* WaveformView.swift */,
 			);
 			path = UI;
@@ -163,6 +178,10 @@
 				C2537C569613A96E32B5C837 /* mic.png */,
 				83131DD91A82551DD5B5F3DE /* mic.tiff */,
 				8F046CD214A902E22762E849 /* mic@2x.tiff */,
+				FD263D25355A394E77259B59 /* micTemplate.png */,
+				27CC5EC969A60B82D7EF82E8 /* micTemplate.tiff */,
+				7E314E1B40D267796F3DDD0E /* micTemplate@2x.tiff */,
+				E707F2E9A4290D30B47CCE4E /* InfoPlist.strings */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -190,7 +209,7 @@
 				4E92F4C2470B331CA2677F2F /* Sources */,
 				B65FF520673E39C56D871D76 /* Resources */,
 				D4378D2560AEC50DC2875E5A /* Frameworks */,
-				02F78FC56F4295C418BC6AEA /* Restart IME */,
+				EFB7DBE0DB91D1CA26A19517 /* Install & Restart IME */,
 			);
 			buildRules = (
 			);
@@ -213,7 +232,8 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					A3BBBBD9F93CAFF9575EF90A = {
-						ProvisioningStyle = Automatic;
+						DevelopmentTeam = JPY8GAYHAP;
+						ProvisioningStyle = Manual;
 					};
 				};
 			};
@@ -223,6 +243,7 @@
 			knownRegions = (
 				Base,
 				en,
+				"zh-Hans",
 			);
 			mainGroup = 765084D33BC832CEAB30E526;
 			minimizedProjectReferenceProxies = 1;
@@ -241,17 +262,22 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B5BDE72D893F40C25FF1FB48 /* InfoPlist.strings in Resources */,
 				94DC524C0700956CF656BFF3 /* mic.png in Resources */,
 				CFA5D4A416E8323355A9CCE9 /* mic.tiff in Resources */,
 				89423AC705ED5B8FA77D0A28 /* mic@2x.tiff in Resources */,
+				FAE197BBF96818D390EECDCF /* micTemplate.png in Resources */,
+				BFEF3D0C4D0477BA47035970 /* micTemplate.tiff in Resources */,
+				F7088F0867FCEA9E0DC0E9CA /* micTemplate@2x.tiff in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		02F78FC56F4295C418BC6AEA /* Restart IME */ = {
+		EFB7DBE0DB91D1CA26A19517 /* Install & Restart IME */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -259,14 +285,14 @@
 			);
 			inputPaths = (
 			);
-			name = "Restart IME";
+			name = "Install & Restart IME";
 			outputFileListPaths = (
 			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "pkill -9 -f VoiceInputIME 2>/dev/null || true\nsleep 0.3\necho \"Done. Switch input source to reload VoiceInputIME.\"\n";
+			shellScript = "pkill -9 -f VoiceInputIME 2>/dev/null || true\nsleep 0.3\nDEST=\"$HOME/Library/Input Methods\"\nrm -rf \"$DEST/VoiceInputIME.app\"\ncp -R \"$BUILT_PRODUCTS_DIR/VoiceInputIME.app\" \"$DEST/\"\ncodesign --force --deep --sign \"Apple Development: it@mmcwellness.ca (AFP2R23LLD)\" --entitlements \"$SRCROOT/Entitlements.plist\" \"$DEST/VoiceInputIME.app\"\n/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -u \"$BUILT_PRODUCTS_DIR/VoiceInputIME.app\" 2>/dev/null || true\n/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -f -R -trusted \"$DEST/VoiceInputIME.app\"\necho \"Done. Switch input source to reload VoiceInputIME.\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -281,9 +307,11 @@
 				E418930FE4CE5781303BB462 /* CandidatePanel.swift in Sources */,
 				C9FCFBC99D434A1DA1D8E485 /* FloatingContentView.swift in Sources */,
 				3328B91BC677FEB090FFCAC4 /* FloatingPanel.swift in Sources */,
+				0315E9F3AE8769C7D7458457 /* GlobalHotkey.swift in Sources */,
 				10C2F3002C9B32E98424E7A5 /* InputSession.swift in Sources */,
 				27585B2AA59039AE59624C2C /* LLMRefiner.swift in Sources */,
 				C41201FF044EDE200C95496F /* RecognitionState.swift in Sources */,
+				7FA98705816B315E5B4B85FA /* SettingsWindow.swift in Sources */,
 				64D8580E93B9DDC123415035 /* SpeechRecognizer.swift in Sources */,
 				7B7069730AE5E3A5438A6D32 /* TextPostProcessor.swift in Sources */,
 				D15AA54C5729E39C3984E693 /* VocabularyDB.swift in Sources */,
@@ -294,6 +322,18 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXVariantGroup section */
+		E707F2E9A4290D30B47CCE4E /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				21A1DF44A963AC537D3D0998 /* en */,
+				75714674649DC579EBDC584D /* zh-Hans */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
 		1F3765632EB95EB01844A506 /* Release */ = {
@@ -357,10 +397,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Entitlements.plist;
-				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Apple Development: it@mmcwellness.ca (AFP2R23LLD)";
+				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CONFIGURATION_BUILD_DIR = "$(HOME)/Library/Input Methods";
 				DEVELOPMENT_TEAM = JPY8GAYHAP;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -375,6 +414,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.voiceinput.inputmethod.VoiceInputIME;
 				PRODUCT_NAME = VoiceInputIME;
+				REGISTER_APP_IN_LAUNCH_SERVICES = NO;
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "Sources/VoiceInputIME/SherpaOnnx-Bridging-Header.h";
@@ -387,10 +427,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Entitlements.plist;
-				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Apple Development: it@mmcwellness.ca (AFP2R23LLD)";
+				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CONFIGURATION_BUILD_DIR = "$(HOME)/Library/Input Methods";
 				DEVELOPMENT_TEAM = JPY8GAYHAP;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -405,6 +444,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.voiceinput.inputmethod.VoiceInputIME;
 				PRODUCT_NAME = VoiceInputIME;
+				REGISTER_APP_IN_LAUNCH_SERVICES = NO;
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "Sources/VoiceInputIME/SherpaOnnx-Bridging-Header.h";
