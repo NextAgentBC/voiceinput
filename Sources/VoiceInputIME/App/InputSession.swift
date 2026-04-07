@@ -130,7 +130,7 @@ final class RecordingSession {
         injectText(text)
 
         if settings.autoSend {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.simulateSend() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.simulateSend() }
         }
     }
 
@@ -191,15 +191,15 @@ final class RecordingSession {
     // MARK: - Auto-Send
 
     private func simulateSend() {
-        let src = CGEventSource(stateID: .hidSystemState)
+        let src = CGEventSource(stateID: .combinedSessionState)
         let useCmd = settings.sendKey == .cmdEnter
         if let d = CGEvent(keyboardEventSource: src, virtualKey: 0x24, keyDown: true) {
             if useCmd { d.flags = .maskCommand }
-            d.post(tap: .cghidEventTap)
+            d.post(tap: .cgAnnotatedSessionEventTap)
         }
         if let u = CGEvent(keyboardEventSource: src, virtualKey: 0x24, keyDown: false) {
             if useCmd { u.flags = .maskCommand }
-            u.post(tap: .cghidEventTap)
+            u.post(tap: .cgAnnotatedSessionEventTap)
         }
     }
 
