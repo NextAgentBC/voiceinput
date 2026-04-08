@@ -39,7 +39,7 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: '14.0'
         SWIFT_VERSION: '5.9'
         GENERATE_INFOPLIST_FILE: false
-        SWIFT_OBJC_BRIDGING_HEADER: Sources/VoiceInputIME/SherpaOnnx-Bridging-Header.h
+
 
     dependencies:
       - framework: Carbon.framework
@@ -49,3 +49,5 @@ targets:
       - framework: Speech.framework
         embed: false
       - sdk: libsqlite3.tbd
+      - framework: ScreenCaptureKit.framework
+        embed: false

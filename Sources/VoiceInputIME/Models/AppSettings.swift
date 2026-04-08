@@ -48,6 +48,48 @@ final class AppSettings: NSObject, ObservableObject {
         didSet { UserDefaults.standard.set(sendKey.rawValue, forKey: "sendKey") }
     }
 
+    // MARK: - Meeting Mode
+    @Published var meetingModeAutoDetect: Bool {
+        didSet { UserDefaults.standard.set(meetingModeAutoDetect, forKey: "meetingModeAutoDetect") }
+    }
+
+    @Published var meetingModeApps: [String] {
+        didSet { UserDefaults.standard.set(meetingModeApps, forKey: "meetingModeApps") }
+    }
+
+    @Published var meetingSelfLabel: String {
+        didSet { UserDefaults.standard.set(meetingSelfLabel, forKey: "meetingSelfLabel") }
+    }
+
+    // MARK: - Meeting Server (Tailscale)
+    @Published var meetingServerEndpoint: String {
+        didSet { UserDefaults.standard.set(meetingServerEndpoint, forKey: "meetingServerEndpoint") }
+    }
+
+    @Published var meetingNumSpeakers: Int {
+        didSet { UserDefaults.standard.set(meetingNumSpeakers, forKey: "meetingNumSpeakers") }
+    }
+
+    @Published var meetingSummarize: Bool {
+        didSet { UserDefaults.standard.set(meetingSummarize, forKey: "meetingSummarize") }
+    }
+
+    // MARK: - System Audio Capture
+    @Published var captureSystemAudio: Bool {
+        didSet { UserDefaults.standard.set(captureSystemAudio, forKey: "captureSystemAudio") }
+    }
+
+    // MARK: - Meeting Diarization
+    @Published var meetingDiarization: Bool {
+        didSet { UserDefaults.standard.set(meetingDiarization, forKey: "meetingDiarization") }
+    }
+
+    static let defaultMeetingModeApps = [
+        "com.apple.Notes", "md.obsidian", "notion.id",
+        "net.shinyfrog.bear", "com.luki.Craft", "abnerworks.Typora",
+        "com.microsoft.onenote.mac"
+    ]
+
     // MARK: - Constants
     static let supportedLanguages: [(code: String, name: String)] = [
         ("zh", "简体中文"),
@@ -68,6 +110,10 @@ final class AppSettings: NSObject, ObservableObject {
         llmEnabled && !llmBaseURL.isEmpty && !llmAPIKey.isEmpty
     }
 
+    var isMeetingServerConfigured: Bool {
+        !meetingServerEndpoint.isEmpty
+    }
+
     // MARK: - Init
     private override init() {
         let d = UserDefaults.standard
@@ -81,6 +127,18 @@ final class AppSettings: NSObject, ObservableObject {
         self.llmBaseURL = d.string(forKey: "llmBaseURL") ?? ""
         self.llmAPIKey = d.string(forKey: "llmAPIKey") ?? ""
         self.llmModel = d.string(forKey: "llmModel") ?? ""
+        // Meeting Mode
+        self.meetingModeAutoDetect = d.object(forKey: "meetingModeAutoDetect") == nil ? true : d.bool(forKey: "meetingModeAutoDetect")
+        self.meetingModeApps = d.stringArray(forKey: "meetingModeApps") ?? AppSettings.defaultMeetingModeApps
+        self.meetingSelfLabel = d.string(forKey: "meetingSelfLabel") ?? "你"
+        // Meeting Server
+        self.meetingServerEndpoint = d.string(forKey: "meetingServerEndpoint") ?? ""
+        self.meetingNumSpeakers = d.integer(forKey: "meetingNumSpeakers")
+        self.meetingSummarize = d.object(forKey: "meetingSummarize") == nil ? true : d.bool(forKey: "meetingSummarize")
+        // System Audio
+        self.captureSystemAudio = d.bool(forKey: "captureSystemAudio")
+        // Diarization
+        self.meetingDiarization = d.bool(forKey: "meetingDiarization")
         super.init()
     }
 }

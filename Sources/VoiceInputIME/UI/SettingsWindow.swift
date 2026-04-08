@@ -10,7 +10,7 @@ final class SettingsWindowController {
     func show() {
         if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 500),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 700),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered, defer: false
         )
@@ -31,6 +31,8 @@ struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var testResult = ""
     @State private var isTesting = false
+    @State private var meetingTestResult = ""
+    @State private var isMeetingTesting = false
 
     var body: some View {
         ScrollView {
@@ -123,6 +125,69 @@ struct SettingsView: View {
                     .padding(8)
                 }
 
+                // Meeting Mode
+                GroupBox(label: Label("Meeting Mode", systemImage: "person.2.fill")) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Auto-detect notes apps", isOn: $settings.meetingModeAutoDetect)
+                        if settings.meetingModeAutoDetect {
+                            LabeledField("My Label", text: $settings.meetingSelfLabel, placeholder: "你")
+                            Text("Detected apps: Notes, Obsidian, Notion, Bear, Craft, Typora, OneNote")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Divider()
+
+                        Text("Meeting Server (Tailscale)")
+                            .font(.headline)
+                        LabeledField("Endpoint", text: $settings.meetingServerEndpoint, placeholder: "http://100.x.x.x:8765")
+
+                        HStack {
+                            Text("Speakers")
+                                .frame(width: 80, alignment: .trailing)
+                            Picker("", selection: $settings.meetingNumSpeakers) {
+                                Text("Auto").tag(0)
+                                ForEach(2...10, id: \.self) { n in
+                                    Text("\(n)").tag(n)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .frame(width: 100)
+                        }
+
+                        Toggle("Generate summary", isOn: $settings.meetingSummarize)
+
+                        HStack {
+                            Button("Test Meeting Server") {
+                                NSLog("[Settings] Test Meeting Server clicked, endpoint: '%@'", settings.meetingServerEndpoint)
+                                testMeetingServer()
+                            }
+                                .disabled(isMeetingTesting || settings.meetingServerEndpoint.isEmpty)
+                            if isMeetingTesting { ProgressView().controlSize(.small) }
+                            if !meetingTestResult.isEmpty {
+                                Text(meetingTestResult)
+                                    .font(.caption)
+                                    .foregroundColor(meetingTestResult.contains("OK") ? .green : .red)
+                            }
+                        }
+
+                        Toggle("Speaker diarization (identify who is speaking)", isOn: $settings.meetingDiarization)
+                        if settings.meetingDiarization {
+                            Text("Uses /transcribe/merge — slower (~5s) but shows SPEAKER_00/01 labels")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Toggle("Capture system audio (for remote meetings)", isOn: $settings.captureSystemAudio)
+                        if settings.captureSystemAudio {
+                            Text("Requires Screen Recording permission. Captures audio from Zoom, Teams, etc.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(8)
+                }
+
                 // LLM
                 GroupBox(label: Label("LLM Refinement", systemImage: "sparkles")) {
                     VStack(alignment: .leading, spacing: 10) {
@@ -148,7 +213,7 @@ struct SettingsView: View {
             }
             .padding(20)
         }
-        .frame(width: 480, height: 500)
+        .frame(width: 480, height: 700)
     }
 
     private func testConnection() {
@@ -156,6 +221,35 @@ struct SettingsView: View {
         Task {
             let r = await testSTT()
             await MainActor.run { testResult = r; isTesting = false }
+        }
+    }
+
+    private func testMeetingServer() {
+        isMeetingTesting = true; meetingTestResult = ""
+        let endpoint = settings.meetingServerEndpoint
+        Task {
+            // Direct test bypassing MeetingClient to debug
+            let trimmed = endpoint.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let urlString = "\(trimmed)/health"
+            guard let url = URL(string: urlString) else {
+                await MainActor.run { meetingTestResult = "Invalid URL: \(urlString)"; isMeetingTesting = false }
+                return
+            }
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 5
+            do {
+                let (_, response) = try await URLSession.shared.data(for: req)
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                await MainActor.run {
+                    meetingTestResult = code == 200 ? "OK" : "HTTP \(code)"
+                    isMeetingTesting = false
+                }
+            } catch {
+                await MainActor.run {
+                    meetingTestResult = "Error: \(error.localizedDescription)"
+                    isMeetingTesting = false
+                }
+            }
         }
     }
 

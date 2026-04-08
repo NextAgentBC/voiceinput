@@ -39,7 +39,7 @@ final class GlobalHotkey {
         // Check if we already have a tap
         if eventTap != nil { return true }
 
-        let mask: CGEventMask = (1 << CGEventType.flagsChanged.rawValue)
+        let mask: CGEventMask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
 
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -70,6 +70,9 @@ final class GlobalHotkey {
         AXIsProcessTrustedWithOptions(options)
     }
 
+    private var zHandled = false
+    private var wasToggle = false
+
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         // Auto-re-enable if macOS disabled the tap
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
@@ -80,26 +83,55 @@ final class GlobalHotkey {
             return Unmanaged.passRetained(event)
         }
 
+        // Fn+Z → toggle meeting session (Z keycode = 0x06)
+        if type == .keyDown && fnPressed {
+            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            if keyCode == 0x06 && !zHandled {
+                zHandled = true
+                wasToggle = true
+                DispatchQueue.main.async {
+                    // Cancel push-to-talk recording that started with Fn
+                    RecordingSession.shared.cancelRecording()
+                    // Toggle continuous meeting session
+                    MeetingModeDetector.shared.toggle()
+                }
+                return nil
+            }
+            // Suppress Z repeats
+            if keyCode == 0x06 { return nil }
+        }
+
         let flags = event.flags
         let fnDown = flags.contains(.maskSecondaryFn)
 
         if fnDown && !fnPressed {
+            // Fn pressed — start push-to-talk (unless meeting session will cancel it)
             fnPressed = true
-            DispatchQueue.main.async { [weak self] in
-                self?.onHotkeyDown?()
-                self?.startSafetyTimer()
+            zHandled = false
+            wasToggle = false
+            // Don't start recording if meeting session is running (Fn is for toggle only)
+            if !MeetingSession.shared.isRunning {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onHotkeyDown?()
+                    self?.startSafetyTimer()
+                }
             }
-            return nil  // Suppress Fn → prevents emoji picker / input switch
+            return nil
         } else if !fnDown && fnPressed {
+            // Fn released
             fnPressed = false
-            DispatchQueue.main.async { [weak self] in
-                self?.stopSafetyTimer()
-                self?.onHotkeyUp?()
+            zHandled = false
+            if !wasToggle && !MeetingSession.shared.isRunning {
+                DispatchQueue.main.async { [weak self] in
+                    self?.stopSafetyTimer()
+                    self?.onHotkeyUp?()
+                }
             }
-            return nil  // Suppress Fn release
+            wasToggle = false
+            return nil
         }
 
-        return Unmanaged.passRetained(event)  // Pass through all other keys
+        return Unmanaged.passRetained(event)
     }
 
     // MARK: - Safety Timer (auto-stop stuck holds)

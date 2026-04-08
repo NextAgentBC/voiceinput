@@ -6,12 +6,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Setup menu bar icon
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Voice Input")
-            button.image?.size = NSSize(width: 16, height: 16)
-            button.image?.isTemplate = true  // Adapts to light/dark mode
-        }
+        updateStatusBarIcon()
         statusItem.menu = buildMenu()
+
+        // Observe meeting mode changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(meetingModeChanged),
+            name: .meetingModeDidChange,
+            object: nil
+        )
 
         // Install global Fn key monitor
         let hotkey = GlobalHotkey.shared
@@ -29,6 +33,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("[VoiceInput] Menu bar app started")
     }
 
+    // MARK: - Status Bar Icon
+
+    private func updateStatusBarIcon() {
+        let inMeeting = MeetingModeDetector.shared.isActive
+        let iconName = inMeeting ? "mic.badge.plus" : "mic.fill"
+        if let button = statusItem.button {
+            button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "Voice Input")
+            button.image?.size = NSSize(width: 16, height: 16)
+            button.image?.isTemplate = true
+        }
+    }
+
+    @objc private func meetingModeChanged() {
+        updateStatusBarIcon()
+        statusItem.menu = buildMenu()
+    }
+
     // MARK: - Menu
 
     private func buildMenu() -> NSMenu {
@@ -39,6 +60,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        menu.addItem(.separator())
+
+        // Meeting Mode
+        let isActive = MeetingModeDetector.shared.isActive
+        let meetingToggle = NSMenuItem(
+            title: isActive ? "Meeting Mode: ON  (Fn+Z)" : "Meeting Mode: OFF  (Fn+Z)",
+            action: #selector(toggleMeetingMode(_:)),
+            keyEquivalent: ""
+        )
+        meetingToggle.target = self
+        meetingToggle.state = isActive ? .on : .off
+        menu.addItem(meetingToggle)
+
+        if isActive && settings.isMeetingServerConfigured {
+            let serverStatus = NSMenuItem(title: "  Server: \(settings.meetingServerEndpoint)", action: nil, keyEquivalent: "")
+            serverStatus.isEnabled = false
+            menu.addItem(serverStatus)
+        }
 
         menu.addItem(.separator())
 
@@ -82,9 +122,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Status
         let status = settings.isSTTConfigured ? "STT: Connected" : "STT: Not configured"
-        let statusItem = NSMenuItem(title: status, action: nil, keyEquivalent: "")
-        statusItem.isEnabled = false
-        menu.addItem(statusItem)
+        let sttStatusItem = NSMenuItem(title: status, action: nil, keyEquivalent: "")
+        sttStatusItem.isEnabled = false
+        menu.addItem(sttStatusItem)
 
         menu.addItem(.separator())
 
@@ -128,6 +168,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func toggleLLM(_ sender: NSMenuItem) {
         AppSettings.shared.llmEnabled.toggle()
         statusItem.menu = buildMenu()
+    }
+
+    @objc func toggleMeetingMode(_ sender: NSMenuItem) {
+        MeetingModeDetector.shared.toggle()
     }
 
     @objc func editDictionary() {

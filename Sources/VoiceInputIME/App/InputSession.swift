@@ -25,6 +25,9 @@ final class RecordingSession {
     private let vocabDB = VocabularyDB.shared
     private let floatingPanel = FloatingPanel()
 
+    /// Dedicated recorder for meeting mode — captures raw PCM for the meeting server.
+    private lazy var meetingRecorder = CloudSTTEngine()
+
     private var settings: AppSettings { AppSettings.shared }
 
     // MARK: - State
@@ -37,23 +40,43 @@ final class RecordingSession {
 
     func startRecording() {
         guard state.isIdle else { return }
-        NSLog("[Recording] START (engine: %@)", settings.sttEngineType.rawValue)
+
+        let useMeeting = isMeetingMode && settings.isMeetingServerConfigured
+        NSLog("[Recording] START (engine: %@, meeting: %@, modeActive: %@, serverConfigured: %@)",
+              settings.sttEngineType.rawValue,
+              useMeeting ? "YES" : "NO",
+              isMeetingMode ? "YES" : "NO",
+              settings.isMeetingServerConfigured ? "YES" : "NO")
 
         state = .recording
         floatingPanel.updateContent(audioLevel: 0)
         floatingPanel.showWithAnimation()
 
-        var engine = currentEngine
-        engine.onAudioLevel = { [weak self] level in
-            self?.handleAudioLevel(level)
-        }
-
-        do {
-            try engine.startRecording(language: settings.selectedLanguage)
-        } catch {
-            NSLog("[Recording] Failed to start: %@", "\(error)")
-            state = .idle
-            floatingPanel.hideWithAnimation()
+        if useMeeting {
+            // Meeting mode: use dedicated recorder to capture WAV
+            meetingRecorder.onAudioLevel = { [weak self] level in
+                self?.handleAudioLevel(level)
+            }
+            do {
+                try meetingRecorder.startRecording(language: settings.selectedLanguage)
+            } catch {
+                NSLog("[Recording] Failed to start meeting recorder: %@", "\(error)")
+                state = .idle
+                floatingPanel.hideWithAnimation()
+            }
+        } else {
+            // Normal mode: use selected STT engine
+            var engine = currentEngine
+            engine.onAudioLevel = { [weak self] level in
+                self?.handleAudioLevel(level)
+            }
+            do {
+                try engine.startRecording(language: settings.selectedLanguage)
+            } catch {
+                NSLog("[Recording] Failed to start: %@", "\(error)")
+                state = .idle
+                floatingPanel.hideWithAnimation()
+            }
         }
     }
 
@@ -65,41 +88,18 @@ final class RecordingSession {
         floatingPanel.updateContent(audioLevel: 0, isRefining: true)
 
         let engine = currentEngine
+        let useMeetingServer = isMeetingMode && settings.isMeetingServerConfigured
 
         activeTask = Task { [weak self] in
             guard let self = self else { return }
 
             do {
-                let rawText = await engine.stopRecording(context: "")
-
-                guard !Task.isCancelled, self.state.isRefining else { return }
-
-                guard !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                    await MainActor.run {
-                        self.state = .idle
-                        self.floatingPanel.hideWithAnimation()
-                    }
-                    return
-                }
-
-                // Post-processing pipeline
-                let (vocabCorrected, applied) = self.vocabDB.applyCorrections(rawText)
-                for (orig, corr) in applied {
-                    self.vocabDB.learn(original: orig, corrected: corr, source: "usage")
-                }
-
-                let processed = self.textPostProcessor.process(vocabCorrected)
-
-                // Optional LLM refinement
-                let refined = await self.llmRefiner.refine(text: processed, context: "", settings: self.settings)
-                guard !Task.isCancelled, self.state.isRefining else { return }
-
-                if refined != processed {
-                    self.vocabDB.learnFromDiff(original: rawText, corrected: refined, source: "ai")
-                }
-
-                await MainActor.run {
-                    self.commitText(refined)
+                if useMeetingServer {
+                    // Meeting server pipeline: get WAV from dedicated recorder, send to server
+                    await self.stopRecordingViaMeetingServer()
+                } else {
+                    // Normal pipeline
+                    await self.stopRecordingNormal(engine: engine)
                 }
             } catch {
                 NSLog("[Recording] Error: %@", "\(error)")
@@ -111,15 +111,87 @@ final class RecordingSession {
         }
     }
 
+    /// Normal STT pipeline: engine → vocab → postprocess → LLM → commit.
+    private func stopRecordingNormal(engine: STTEngine) async {
+        let rawText = await engine.stopRecording(context: "")
+
+        guard !Task.isCancelled, self.state.isRefining else { return }
+
+        guard !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            await MainActor.run {
+                self.state = .idle
+                self.floatingPanel.hideWithAnimation()
+            }
+            return
+        }
+
+        let (vocabCorrected, applied) = self.vocabDB.applyCorrections(rawText)
+        for (orig, corr) in applied {
+            self.vocabDB.learn(original: orig, corrected: corr, source: "usage")
+        }
+
+        let processed = self.textPostProcessor.process(vocabCorrected)
+
+        let refined = await self.llmRefiner.refine(text: processed, context: "", settings: self.settings)
+        guard !Task.isCancelled, self.state.isRefining else { return }
+
+        if refined != processed {
+            self.vocabDB.learnFromDiff(original: rawText, corrected: refined, source: "ai")
+        }
+
+        await MainActor.run {
+            self.commitText(refined)
+        }
+    }
+
+    /// Meeting server pipeline: get WAV from dedicated meeting recorder, send to server.
+    private func stopRecordingViaMeetingServer() async {
+        let wavData = meetingRecorder.stopRecordingAndGetWAV()
+
+        guard !Task.isCancelled, self.state.isRefining else { return }
+
+        guard let wav = wavData, !wav.isEmpty else {
+            NSLog("[Recording] No audio data for meeting server")
+            await MainActor.run {
+                self.state = .idle
+                self.floatingPanel.hideWithAnimation()
+            }
+            return
+        }
+
+        NSLog("[Recording] Sending %d bytes to meeting server", wav.count)
+        if let transcript = await MeetingClient.transcribe(audioData: wav, language: settings.selectedLanguage) {
+            guard !Task.isCancelled, self.state.isRefining else { return }
+            let formatted = transcript.formatForPaste()
+            await MainActor.run {
+                self.commitText(formatted)
+            }
+        } else {
+            NSLog("[Recording] Meeting server failed")
+            await MainActor.run {
+                self.state = .idle
+                self.floatingPanel.hideWithAnimation()
+            }
+        }
+    }
+
     func cancelRecording() {
         activeTask?.cancel()
         activeTask = nil
-        Task { _ = await currentEngine.stopRecording(context: "") }
+        if isMeetingMode {
+            _ = meetingRecorder.stopRecordingAndGetWAV()
+        } else {
+            Task { _ = await currentEngine.stopRecording(context: "") }
+        }
         state = .idle
         floatingPanel.hideWithAnimation()
     }
 
     // MARK: - Text Injection
+
+    private var isMeetingMode: Bool {
+        MeetingModeDetector.shared.isActive
+    }
 
     private func commitText(_ text: String) {
         guard state.isRefining else { return }
@@ -127,9 +199,19 @@ final class RecordingSession {
 
         state = .idle
         floatingPanel.hideWithAnimation()
-        injectText(text)
 
-        if settings.autoSend {
+        let finalText: String
+        if isMeetingMode && !settings.isMeetingServerConfigured {
+            // Meeting mode without server: prefix with self label
+            finalText = "[\(settings.meetingSelfLabel)] \(text)\n"
+        } else {
+            finalText = text
+        }
+
+        injectText(finalText)
+
+        // Meeting mode suppresses auto-send
+        if settings.autoSend && !isMeetingMode {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.simulateSend() }
         }
     }

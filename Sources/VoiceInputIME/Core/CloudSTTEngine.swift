@@ -68,7 +68,23 @@ final class CloudSTTEngine: STTEngine {
     }
 
     func stopRecording(context: String) async -> String {
-        guard isRecording else { return "" }
+        guard let wavData = stopRecordingRaw() else { return "" }
+        return await transcribeWithRetry(wavData, context: context)
+    }
+
+    /// Stop recording and return raw WAV data without transcribing.
+    /// Used by meeting server pipeline to get audio for external processing.
+    func stopRecordingAndGetWAV() -> Data? {
+        return stopRecordingRaw()
+    }
+
+    /// Transcribe pre-built WAV data (used as fallback when meeting server fails).
+    func transcribeWAV(_ wavData: Data, context: String) async -> String {
+        return await transcribeWithRetry(wavData, context: context)
+    }
+
+    private func stopRecordingRaw() -> Data? {
+        guard isRecording else { return nil }
         isRecording = false
 
         if let engine = audioEngine {
@@ -85,11 +101,10 @@ final class CloudSTTEngine: STTEngine {
         let minBytes = Int(16000 * 0.3) * 2
         guard raw.count >= minBytes else {
             NSLog("[CloudSTT] Recording too short (%d bytes)", raw.count)
-            return ""
+            return nil
         }
 
-        let wavData = buildWAV(pcm: raw)
-        return await transcribeWithRetry(wavData, context: context)
+        return buildWAV(pcm: raw)
     }
 
     // MARK: - WAV Builder
