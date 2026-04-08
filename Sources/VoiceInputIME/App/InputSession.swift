@@ -130,7 +130,7 @@ final class RecordingSession {
         injectText(text)
 
         if settings.autoSend {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.simulateSend() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.simulateSend() }
         }
     }
 
