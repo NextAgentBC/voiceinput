@@ -1,0 +1,54 @@
+name: VoiceInputiOS
+options:
+  bundleIdPrefix: com.voiceinput
+  deploymentTarget:
+    iOS: '17.0'
+  xcodeVersion: '16.0'
+
+settings:
+  base:
+    SWIFT_VERSION: '5.9'
+    IPHONEOS_DEPLOYMENT_TARGET: '17.0'
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: 'WA4JUD762R'
+    MARKETING_VERSION: '0.1.0'
+    CURRENT_PROJECT_VERSION: '9'
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    # Shared app group for Settings exchange between container and keyboard.
+    # Replace with your own group id after creating it in the Developer portal.
+    APP_GROUP_ID: group.com.voiceinput.shared
+
+targets:
+  VoiceInputiOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ca.nextagent.voiceinput
+        INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Entitlements/App.entitlements
+        TARGETED_DEVICE_FAMILY: '1,2'
+        SWIFT_OBJC_BRIDGING_HEADER: ''
+    dependencies:
+      - target: VoiceInputKeyboard
+      - sdk: Speech.framework
+      - sdk: AVFoundation.framework
+
+  VoiceInputKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Keyboard
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ca.nextagent.voiceinput.keyboard
+        INFOPLIST_FILE: Keyboard/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Entitlements/Keyboard.entitlements
+        TARGETED_DEVICE_FAMILY: '1,2'
+    dependencies:
+      - sdk: Speech.framework
+      - sdk: AVFoundation.framework
