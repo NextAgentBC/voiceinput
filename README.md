@@ -10,7 +10,7 @@
 
 ### 安装
 
-1. 下载 [VoiceInput-0.1.0.dmg](https://github.com/NextAgentBC/voiceinput/releases/latest)
+1. 下载 [VoiceInput-0.3.0.dmg](https://github.com/NextAgentBC/voiceinput/releases/latest)
 2. 打开 DMG，将 **VoiceInput.app** 拖到 **应用程序** 文件夹
 3. 双击打开 VoiceInput
 4. 授权 **辅助功能** 权限（全局快捷键必需）：
@@ -76,7 +76,7 @@ Hold the Fn key to speak, release to automatically type the transcription into a
 
 ### Installation
 
-1. Download [VoiceInput-0.1.0.dmg](https://github.com/NextAgentBC/voiceinput/releases/latest)
+1. Download [VoiceInput-0.3.0.dmg](https://github.com/NextAgentBC/voiceinput/releases/latest)
 2. Open the DMG, drag **VoiceInput.app** to **Applications**
 3. Launch VoiceInput
 4. Grant **Accessibility** permission (required for global hotkey):

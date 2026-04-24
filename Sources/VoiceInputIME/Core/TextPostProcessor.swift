@@ -96,7 +96,7 @@ final class TextPostProcessor {
         // and <sep> is a dot-synonym with optional surrounding whitespace
         //
         // This correctly handles "example dot com", "example.com",
-        // "AP DOT BORUI DOT CA", "AP点博瑞点CA", etc.
+        // "AP DOT EXAMPLE DOT COM", "AP点示例点COM", etc.
 
         let segmentPat = "(?:[A-Za-z0-9]+|[\\u4e00-\\u9fff]+)"
         let dotSepPat  = buildSepPattern(Self.dotSynonyms + ["."])
