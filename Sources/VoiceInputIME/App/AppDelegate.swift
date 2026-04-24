@@ -1,53 +1,39 @@
 import Cocoa
+import os.log
+
+private let logger = Logger(subsystem: "com.voiceinput.app", category: "App")
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Setup menu bar icon
+        logger.info("applicationDidFinishLaunching")
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         updateStatusBarIcon()
         statusItem.menu = buildMenu()
 
-        // Observe meeting mode changes
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(meetingModeChanged),
-            name: .meetingModeDidChange,
-            object: nil
-        )
-
-        // Install global Fn key monitor
         let hotkey = GlobalHotkey.shared
         hotkey.onHotkeyDown = { RecordingSession.shared.startRecording() }
         hotkey.onHotkeyUp = { RecordingSession.shared.stopRecording() }
         hotkey.install()
 
-        // Show settings on first run
         if !AppSettings.shared.isSTTConfigured {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 SettingsWindowController.shared.show()
             }
         }
 
-        NSLog("[VoiceInput] Menu bar app started")
+        logger.info("Menu bar app started")
     }
 
     // MARK: - Status Bar Icon
 
     private func updateStatusBarIcon() {
-        let inMeeting = MeetingModeDetector.shared.isActive
-        let iconName = inMeeting ? "mic.badge.plus" : "mic.fill"
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "Voice Input")
+            button.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Voice Input")
             button.image?.size = NSSize(width: 16, height: 16)
             button.image?.isTemplate = true
         }
-    }
-
-    @objc private func meetingModeChanged() {
-        updateStatusBarIcon()
-        statusItem.menu = buildMenu()
     }
 
     // MARK: - Menu
@@ -56,39 +42,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         let settings = AppSettings.shared
 
-        // Settings
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
 
-        menu.addItem(.separator())
-
-        // Meeting Mode
-        let isActive = MeetingModeDetector.shared.isActive
-        let meetingToggle = NSMenuItem(
-            title: isActive ? "Meeting Mode: ON  (Fn+Z)" : "Meeting Mode: OFF  (Fn+Z)",
-            action: #selector(toggleMeetingMode(_:)),
-            keyEquivalent: ""
-        )
-        meetingToggle.target = self
-        meetingToggle.state = isActive ? .on : .off
-        menu.addItem(meetingToggle)
-
-        if isActive && settings.isMeetingServerConfigured {
-            let serverStatus = NSMenuItem(title: "  Server: \(settings.meetingServerEndpoint)", action: nil, keyEquivalent: "")
-            serverStatus.isEnabled = false
-            menu.addItem(serverStatus)
-        }
+        let sessionsItem = NSMenuItem(title: "Sessions...", action: #selector(openSessions), keyEquivalent: "h")
+        sessionsItem.target = self
+        menu.addItem(sessionsItem)
 
         menu.addItem(.separator())
 
-        // Auto Send
-        let autoSendItem = NSMenuItem(title: "Auto Send (Enter)", action: #selector(toggleAutoSend(_:)), keyEquivalent: "")
+        let autoSendItem = NSMenuItem(title: "Auto Send", action: #selector(toggleAutoSend(_:)), keyEquivalent: "")
         autoSendItem.target = self
         autoSendItem.state = settings.autoSend ? .on : .off
         menu.addItem(autoSendItem)
 
-        // Language
         let langItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
         let langMenu = NSMenu()
         for lang in AppSettings.supportedLanguages {
@@ -103,7 +71,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        // LLM
         let llmItem = NSMenuItem(title: "LLM Refinement", action: nil, keyEquivalent: "")
         let llmMenu = NSMenu()
         let enableItem = NSMenuItem(title: "Enable", action: #selector(toggleLLM(_:)), keyEquivalent: "")
@@ -115,12 +82,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        // Edit Dictionary
-        let dictItem = NSMenuItem(title: "Edit Dictionary...", action: #selector(editDictionary), keyEquivalent: "")
-        dictItem.target = self
-        menu.addItem(dictItem)
+        let forgetItem = NSMenuItem(title: "Forget Last Correction", action: #selector(forgetLastCorrection), keyEquivalent: "")
+        forgetItem.target = self
+        forgetItem.toolTip = "If the last paste was wrong, click to un-learn that LLM cache entry."
+        menu.addItem(forgetItem)
 
-        // Status
+        let runAgentItem = NSMenuItem(title: "Run Learning Agent Now", action: #selector(runAgent), keyEquivalent: "")
+        runAgentItem.target = self
+        runAgentItem.toolTip = "Analyze recent sessions to mine new corrections + vocabulary."
+        menu.addItem(runAgentItem)
+
+        menu.addItem(.separator())
+
         let status = settings.isSTTConfigured ? "STT: Connected" : "STT: Not configured"
         let sttStatusItem = NSMenuItem(title: status, action: nil, keyEquivalent: "")
         sttStatusItem.isEnabled = false
@@ -128,21 +101,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        // How to use
         let howToItem = NSMenuItem(title: "Hold Fn to record", action: nil, keyEquivalent: "")
         howToItem.isEnabled = false
         menu.addItem(howToItem)
 
         menu.addItem(.separator())
 
-        // Quit
         let quitItem = NSMenuItem(title: "Quit Voice Input", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quitItem)
 
         return menu
     }
-
-    // MARK: - Menu needs refresh on each open
 
     @objc func menuWillOpen(_ menu: NSMenu) {
         statusItem.menu = buildMenu()
@@ -152,6 +121,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openSettings() {
         SettingsWindowController.shared.show()
+    }
+
+    @objc func openSessions() {
+        SessionsWindowController.shared.show()
     }
 
     @objc func toggleAutoSend(_ sender: NSMenuItem) {
@@ -170,13 +143,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = buildMenu()
     }
 
-    @objc func toggleMeetingMode(_ sender: NSMenuItem) {
-        MeetingModeDetector.shared.toggle()
+    @objc func forgetLastCorrection() {
+        RecordingSession.shared.rejectLastCacheKey()
     }
 
-    @objc func editDictionary() {
-        let dictPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".voiceinput/dictionary.json")
-        NSWorkspace.shared.open(dictPath)
+    @objc func runAgent() {
+        LearningAgent.shared.runManualL2()
     }
 }

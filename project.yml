@@ -49,5 +49,3 @@ targets:
       - framework: Speech.framework
         embed: false
       - sdk: libsqlite3.tbd
-      - framework: ScreenCaptureKit.framework
-        embed: false

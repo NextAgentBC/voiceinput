@@ -1,5 +1,8 @@
 import Foundation
 import AVFoundation
+import os.log
+
+private let cloudLog = Logger(subsystem: "com.voiceinput.app", category: "CloudSTT")
 
 /// Cloud-based STT engine. Sends recorded audio to a remote API endpoint.
 final class CloudSTTEngine: STTEngine {
@@ -72,17 +75,6 @@ final class CloudSTTEngine: STTEngine {
         return await transcribeWithRetry(wavData, context: context)
     }
 
-    /// Stop recording and return raw WAV data without transcribing.
-    /// Used by meeting server pipeline to get audio for external processing.
-    func stopRecordingAndGetWAV() -> Data? {
-        return stopRecordingRaw()
-    }
-
-    /// Transcribe pre-built WAV data (used as fallback when meeting server fails).
-    func transcribeWAV(_ wavData: Data, context: String) async -> String {
-        return await transcribeWithRetry(wavData, context: context)
-    }
-
     private func stopRecordingRaw() -> Data? {
         guard isRecording else { return nil }
         isRecording = false
@@ -100,7 +92,7 @@ final class CloudSTTEngine: STTEngine {
 
         let minBytes = Int(16000 * 0.3) * 2
         guard raw.count >= minBytes else {
-            NSLog("[CloudSTT] Recording too short (%d bytes)", raw.count)
+            cloudLog.warning("Recording too short (\(raw.count) bytes)")
             return nil
         }
 
@@ -135,7 +127,7 @@ final class CloudSTTEngine: STTEngine {
         for attempt in 1...3 {
             let result = await transcribe(audioData, context: context)
             if !result.isEmpty { return result }
-            NSLog("[CloudSTT] Attempt %d/3 failed, retrying...", attempt)
+            cloudLog.warning("Attempt \(attempt)/3 failed, retrying...")
             try? await Task.sleep(nanoseconds: UInt64(attempt) * 300_000_000)
         }
         return ""
@@ -144,7 +136,7 @@ final class CloudSTTEngine: STTEngine {
     private func transcribe(_ audioData: Data, context: String) async -> String {
         let settings = AppSettings.shared
         guard !settings.sttEndpoint.isEmpty, !settings.sttAPIKey.isEmpty else {
-            NSLog("[CloudSTT] No endpoint or API key configured")
+            cloudLog.error("No endpoint or API key configured")
             return ""
         }
 
@@ -178,17 +170,17 @@ final class CloudSTTEngine: STTEngine {
             let (data, response) = try await URLSession.shared.data(for: req)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard code == 200 else {
-                NSLog("[CloudSTT] HTTP %d", code)
+                cloudLog.error("HTTP \(code)")
                 return ""
             }
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let text = json["text"] as? String {
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                NSLog("[CloudSTT] \"%@\"", trimmed)
+                cloudLog.info("result: \(trimmed, privacy: .public)")
                 return trimmed
             }
         } catch {
-            NSLog("[CloudSTT] %@", "\(error)")
+            cloudLog.error("\(error, privacy: .public)")
         }
         return ""
     }

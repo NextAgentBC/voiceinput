@@ -1,5 +1,8 @@
 import Cocoa
 import Carbon
+import os.log
+
+private let hotkeyLog = Logger(subsystem: "com.voiceinput.app", category: "GlobalHotkey")
 
 /// Monitors Fn key globally using CGEvent tap with .defaultTap.
 /// Requires Accessibility permission — prompts user if missing.
@@ -17,34 +20,35 @@ final class GlobalHotkey {
     private let maxHoldDuration: TimeInterval = 120
     private var retryTimer: Timer?
 
-    /// Install the global event tap. Retries automatically if permission not yet granted.
     func install() {
         if tryInstallTap() {
-            NSLog("[GlobalHotkey] Installed global Fn key monitor")
+            hotkeyLog.info("Installed global Fn key monitor")
         } else {
-            NSLog("[GlobalHotkey] No Accessibility permission. Requesting...")
+            hotkeyLog.warning("No Accessibility permission. Requesting...")
             promptAccessibility()
-            // Retry every 2 seconds until permission is granted
             retryTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] timer in
                 if self?.tryInstallTap() == true {
                     timer.invalidate()
                     self?.retryTimer = nil
-                    NSLog("[GlobalHotkey] Accessibility granted — installed global Fn key monitor")
+                    hotkeyLog.info("Accessibility granted — installed global Fn key monitor")
                 }
             }
         }
     }
 
     private func tryInstallTap() -> Bool {
-        // Check if we already have a tap
         if eventTap != nil { return true }
 
-        let mask: CGEventMask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
+        let mask: CGEventMask =
+            (1 << CGEventType.flagsChanged.rawValue) |
+            (1 << CGEventType.keyDown.rawValue) |
+            (1 << CGEventType.leftMouseDown.rawValue) |
+            (1 << CGEventType.rightMouseDown.rawValue)
 
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .defaultTap,          // Can suppress Fn key
+            options: .defaultTap,
             eventsOfInterest: mask,
             callback: { _, type, event, refcon -> Unmanaged<CGEvent>? in
                 guard let refcon = refcon else { return Unmanaged.passRetained(event) }
@@ -63,84 +67,114 @@ final class GlobalHotkey {
         return true
     }
 
-    /// Prompt the user to enable Accessibility permission
     private func promptAccessibility() {
-        // This triggers the system "allow Accessibility" dialog
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
     }
 
-    private var zHandled = false
-    private var wasToggle = false
-
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        // Auto-re-enable if macOS disabled the tap
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
-                NSLog("[GlobalHotkey] Re-enabled event tap after system disabled it")
+                hotkeyLog.info("Re-enabled event tap after system disabled it")
             }
             return Unmanaged.passRetained(event)
         }
 
-        // Fn+Z → toggle meeting session (Z keycode = 0x06)
-        if type == .keyDown && fnPressed {
+        // Pre-send countdown: intercept Esc/Cmd+./Enter while auto-send is pending.
+        if type == .keyDown && PreSendController.shared.isPending {
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-            if keyCode == 0x06 && !zHandled {
-                zHandled = true
-                wasToggle = true
+            let action = PreSendController.shared.handleKeyDown(keyCode: keyCode, flags: event.flags)
+            if action == .consume { return nil }
+        }
+
+        // Any non-synthetic input event during the "paste → send" window
+        // means the user is editing. Cancel LLM overwrite + auto-send,
+        // preserve the pasted text, and we'll learn from their final version
+        // when they eventually press Enter.
+        let rec = RecordingSession.shared
+        let pre = PreSendController.shared
+        let inEditWindow = (rec.isRefining || pre.isPending)
+            && !rec.isInjecting
+            && !pre.isFiringOwnEnter
+
+        if type == .keyDown && inEditWindow {
+            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            let isEsc = keyCode == 53
+            let isCmdDot = keyCode == 47 && event.flags.contains(.maskCommand)
+            if isEsc || isCmdDot {
                 DispatchQueue.main.async {
-                    // Cancel push-to-talk recording that started with Fn
-                    RecordingSession.shared.cancelRecording()
-                    // Toggle continuous meeting session
-                    MeetingModeDetector.shared.toggle()
+                    rec.cancelRecording()
                 }
                 return nil
             }
-            // Suppress Z repeats
-            if keyCode == 0x06 { return nil }
+            // Any other keyDown (arrow, backspace, printable, Enter) →
+            // treat as user editing intent. We do NOT consume the event,
+            // so their typing lands normally in the app.
+            DispatchQueue.main.async {
+                rec.userStartedEditing()
+            }
         }
 
-        let flags = event.flags
-        let fnDown = flags.contains(.maskSecondaryFn)
+        if (type == .leftMouseDown || type == .rightMouseDown) && inEditWindow {
+            DispatchQueue.main.async {
+                rec.userStartedEditing()
+            }
+        }
 
-        if fnDown && !fnPressed {
-            // Fn pressed — start push-to-talk (unless meeting session will cancel it)
-            fnPressed = true
-            zHandled = false
-            wasToggle = false
-            // Don't start recording if meeting session is running (Fn is for toggle only)
-            if !MeetingSession.shared.isRunning {
+        // User pressed Enter on a pasted utterance (auto-send not pending
+        // and not our own synthetic Enter). Read AX *synchronously* here —
+        // before Enter reaches the app and clears the input box.
+        if type == .keyDown
+            && !pre.isPending
+            && !pre.isFiringOwnEnter
+            && !rec.isInjecting {
+            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            if keyCode == 0x24 {
+                let captured = FocusedTextReader.read()
+                DispatchQueue.main.async {
+                    rec.learnFromUserEditIfAny(capturedText: captured)
+                }
+                // Let Enter pass through to the app.
+            }
+        }
+
+        // Fn press/release ONLY comes from flagsChanged events on keyCode 63.
+        // Arrow keys (123-126) emit keyDown with .maskSecondaryFn set too,
+        // so we must not read the flag on non-flagsChanged events.
+        if type == .flagsChanged {
+            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            guard keyCode == 63 else { return Unmanaged.passRetained(event) }
+
+            let fnDown = event.flags.contains(.maskSecondaryFn)
+
+            if fnDown && !fnPressed {
+                fnPressed = true
                 DispatchQueue.main.async { [weak self] in
                     self?.onHotkeyDown?()
                     self?.startSafetyTimer()
                 }
-            }
-            return nil
-        } else if !fnDown && fnPressed {
-            // Fn released
-            fnPressed = false
-            zHandled = false
-            if !wasToggle && !MeetingSession.shared.isRunning {
+                return nil
+            } else if !fnDown && fnPressed {
+                fnPressed = false
                 DispatchQueue.main.async { [weak self] in
                     self?.stopSafetyTimer()
                     self?.onHotkeyUp?()
                 }
+                return nil
             }
-            wasToggle = false
-            return nil
         }
 
         return Unmanaged.passRetained(event)
     }
 
-    // MARK: - Safety Timer (auto-stop stuck holds)
+    // MARK: - Safety Timer
 
     private func startSafetyTimer() {
         stopSafetyTimer()
         safetyTimer = Timer.scheduledTimer(withTimeInterval: maxHoldDuration, repeats: false) { [weak self] _ in
             guard let self = self, self.fnPressed else { return }
-            NSLog("[GlobalHotkey] Safety timer fired after %.0fs — auto-releasing", self.maxHoldDuration)
+            hotkeyLog.warning("Safety timer fired after \(self.maxHoldDuration)s — auto-releasing")
             self.fnPressed = false
             self.onHotkeyUp?()
         }

@@ -9,7 +9,6 @@ final class AppSettings: NSObject, ObservableObject {
         didSet { UserDefaults.standard.set(sttEngineType.rawValue, forKey: "sttEngineType") }
     }
 
-    // MARK: - Cloud STT Settings (only used when engine = .cloud)
     @Published var sttEndpoint: String {
         didSet { UserDefaults.standard.set(sttEndpoint, forKey: "sttEndpoint") }
     }
@@ -48,46 +47,38 @@ final class AppSettings: NSObject, ObservableObject {
         didSet { UserDefaults.standard.set(sendKey.rawValue, forKey: "sendKey") }
     }
 
-    // MARK: - Meeting Mode
-    @Published var meetingModeAutoDetect: Bool {
-        didSet { UserDefaults.standard.set(meetingModeAutoDetect, forKey: "meetingModeAutoDetect") }
+    /// Delay between pasting text and simulating Enter/Cmd+Enter.
+    /// User can press Esc / Cmd+. during this window to cancel the send.
+    @Published var autoSendDelay: TimeInterval {
+        didSet { UserDefaults.standard.set(autoSendDelay, forKey: "autoSendDelay") }
     }
 
-    @Published var meetingModeApps: [String] {
-        didSet { UserDefaults.standard.set(meetingModeApps, forKey: "meetingModeApps") }
+    // MARK: - Learning Agent
+    @Published var agentAutoLearnEnabled: Bool {
+        didSet { UserDefaults.standard.set(agentAutoLearnEnabled, forKey: "agentAutoLearnEnabled") }
     }
 
-    @Published var meetingSelfLabel: String {
-        didSet { UserDefaults.standard.set(meetingSelfLabel, forKey: "meetingSelfLabel") }
+    // MARK: - Session Logging
+    @Published var sessionLoggingEnabled: Bool {
+        didSet { UserDefaults.standard.set(sessionLoggingEnabled, forKey: "sessionLoggingEnabled") }
     }
 
-    // MARK: - Meeting Server (Tailscale)
-    @Published var meetingServerEndpoint: String {
-        didSet { UserDefaults.standard.set(meetingServerEndpoint, forKey: "meetingServerEndpoint") }
+    /// Days of session history to retain. 0 = forever.
+    @Published var sessionRetentionDays: Int {
+        didSet { UserDefaults.standard.set(sessionRetentionDays, forKey: "sessionRetentionDays") }
     }
 
-    @Published var meetingNumSpeakers: Int {
-        didSet { UserDefaults.standard.set(meetingNumSpeakers, forKey: "meetingNumSpeakers") }
+    /// Bundle IDs never logged (password managers, banking apps, etc.).
+    @Published var sessionBlacklist: [String] {
+        didSet { UserDefaults.standard.set(sessionBlacklist, forKey: "sessionBlacklist") }
     }
 
-    @Published var meetingSummarize: Bool {
-        didSet { UserDefaults.standard.set(meetingSummarize, forKey: "meetingSummarize") }
-    }
-
-    // MARK: - System Audio Capture
-    @Published var captureSystemAudio: Bool {
-        didSet { UserDefaults.standard.set(captureSystemAudio, forKey: "captureSystemAudio") }
-    }
-
-    // MARK: - Meeting Diarization
-    @Published var meetingDiarization: Bool {
-        didSet { UserDefaults.standard.set(meetingDiarization, forKey: "meetingDiarization") }
-    }
-
-    static let defaultMeetingModeApps = [
-        "com.apple.Notes", "md.obsidian", "notion.id",
-        "net.shinyfrog.bear", "com.luki.Craft", "abnerworks.Typora",
-        "com.microsoft.onenote.mac"
+    static let defaultSessionBlacklist = [
+        "com.agilebits.onepassword7",
+        "com.agilebits.onepassword",
+        "com.bitwarden.desktop",
+        "com.lastpass.LastPass",
+        "com.apple.keychainaccess",
     ]
 
     // MARK: - Constants
@@ -100,18 +91,14 @@ final class AppSettings: NSObject, ObservableObject {
 
     var isSTTConfigured: Bool {
         switch sttEngineType {
-        case .apple: return true  // Always ready
+        case .apple: return true
         case .cloud: return !sttEndpoint.isEmpty && !sttAPIKey.isEmpty
-        case .whisper: return false  // Not yet available
+        case .whisper: return false
         }
     }
 
     var isLLMConfigured: Bool {
         llmEnabled && !llmBaseURL.isEmpty && !llmAPIKey.isEmpty
-    }
-
-    var isMeetingServerConfigured: Bool {
-        !meetingServerEndpoint.isEmpty
     }
 
     // MARK: - Init
@@ -123,22 +110,16 @@ final class AppSettings: NSObject, ObservableObject {
         self.selectedLanguage = d.string(forKey: "selectedLanguage") ?? "zh"
         self.autoSend = d.object(forKey: "autoSend") == nil ? false : d.bool(forKey: "autoSend")
         self.sendKey = SendKeyType(rawValue: d.string(forKey: "sendKey") ?? "") ?? .enter
-        self.llmEnabled = d.bool(forKey: "llmEnabled")
+        // Default 0 — LLM processing itself provides the Esc cancel window.
+        self.autoSendDelay = d.object(forKey: "autoSendDelay") == nil ? 0.0 : d.double(forKey: "autoSendDelay")
+        self.sessionLoggingEnabled = d.object(forKey: "sessionLoggingEnabled") == nil ? true : d.bool(forKey: "sessionLoggingEnabled")
+        self.agentAutoLearnEnabled = d.object(forKey: "agentAutoLearnEnabled") == nil ? true : d.bool(forKey: "agentAutoLearnEnabled")
+        self.sessionRetentionDays = d.object(forKey: "sessionRetentionDays") == nil ? 30 : d.integer(forKey: "sessionRetentionDays")
+        self.sessionBlacklist = d.stringArray(forKey: "sessionBlacklist") ?? AppSettings.defaultSessionBlacklist
+        self.llmEnabled = d.object(forKey: "llmEnabled") == nil ? true : d.bool(forKey: "llmEnabled")
         self.llmBaseURL = d.string(forKey: "llmBaseURL") ?? ""
         self.llmAPIKey = d.string(forKey: "llmAPIKey") ?? ""
         self.llmModel = d.string(forKey: "llmModel") ?? ""
-        // Meeting Mode
-        self.meetingModeAutoDetect = d.object(forKey: "meetingModeAutoDetect") == nil ? true : d.bool(forKey: "meetingModeAutoDetect")
-        self.meetingModeApps = d.stringArray(forKey: "meetingModeApps") ?? AppSettings.defaultMeetingModeApps
-        self.meetingSelfLabel = d.string(forKey: "meetingSelfLabel") ?? "你"
-        // Meeting Server
-        self.meetingServerEndpoint = d.string(forKey: "meetingServerEndpoint") ?? ""
-        self.meetingNumSpeakers = d.integer(forKey: "meetingNumSpeakers")
-        self.meetingSummarize = d.object(forKey: "meetingSummarize") == nil ? true : d.bool(forKey: "meetingSummarize")
-        // System Audio
-        self.captureSystemAudio = d.bool(forKey: "captureSystemAudio")
-        // Diarization
-        self.meetingDiarization = d.bool(forKey: "meetingDiarization")
         super.init()
     }
 }

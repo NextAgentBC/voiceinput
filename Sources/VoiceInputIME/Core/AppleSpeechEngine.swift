@@ -1,6 +1,9 @@
 import Foundation
 import Speech
 import AVFoundation
+import os.log
+
+private let appleLog = Logger(subsystem: "com.voiceinput.app", category: "AppleSpeech")
 
 /// Local STT engine using Apple's Speech.framework. Free, offline, no API key needed.
 final class AppleSpeechEngine: STTEngine {
@@ -30,6 +33,13 @@ final class AppleSpeechEngine: STTEngine {
         request.shouldReportPartialResults = true
         if #available(macOS 15, *) {
             request.addsPunctuation = true
+        }
+        // Feed the user's personal vocabulary (custom names, tech terms,
+        // project names) as priors so Apple Speech can recognise them.
+        let priorTerms = VocabularyDB.shared.topCorrectedTerms(limit: 100)
+        if !priorTerms.isEmpty {
+            request.contextualStrings = priorTerms
+            appleLog.info("contextualStrings: \(priorTerms.count) terms")
         }
         recognitionRequest = request
         finalText = ""
@@ -82,7 +92,7 @@ final class AppleSpeechEngine: STTEngine {
         recognitionRequest = nil
 
         let result = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
-        NSLog("[AppleSpeech] \"%@\"", result)
+        appleLog.info("result: \(result, privacy: .public)")
         return result
     }
 

@@ -1,11 +1,14 @@
 import Foundation
+import os.log
 
-/// Local Whisper STT engine (placeholder — will be implemented in v0.2).
+private let whisperLog = Logger(subsystem: "com.voiceinput.app", category: "Whisper")
+
+/// Local Whisper STT engine (placeholder — not yet implemented).
 final class WhisperEngine: STTEngine {
     var onAudioLevel: ((Float) -> Void)?
 
     func startRecording(language: String) throws {
-        NSLog("[Whisper] Local Whisper engine is not yet available")
+        whisperLog.error("Local Whisper engine is not yet available")
         throw STTError.noInputDevice
     }
 

@@ -10,7 +10,7 @@ final class SettingsWindowController {
     func show() {
         if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 700),
+            contentRect: NSRect(x: 0, y: 0, width: 540, height: 700),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered, defer: false
         )
@@ -31,14 +31,11 @@ struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var testResult = ""
     @State private var isTesting = false
-    @State private var meetingTestResult = ""
-    @State private var isMeetingTesting = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
 
-                // Engine Selector
                 GroupBox(label: Label("Speech Engine", systemImage: "waveform")) {
                     VStack(alignment: .leading, spacing: 10) {
                         Picker("Engine", selection: $settings.sttEngineType) {
@@ -58,7 +55,6 @@ struct SettingsView: View {
                     .padding(8)
                 }
 
-                // Cloud API Settings (only when cloud selected)
                 if settings.sttEngineType == .cloud {
                     GroupBox(label: Label("Cloud API", systemImage: "cloud")) {
                         VStack(alignment: .leading, spacing: 10) {
@@ -80,7 +76,6 @@ struct SettingsView: View {
                     }
                 }
 
-                // Whisper notice
                 if settings.sttEngineType == .whisper {
                     GroupBox(label: Label("Local Whisper", systemImage: "desktopcomputer")) {
                         Text("Local Whisper engine will be available in a future update. Please select Apple (Local) or Cloud API for now.")
@@ -90,7 +85,6 @@ struct SettingsView: View {
                     }
                 }
 
-                // Language
                 GroupBox(label: Label("Language", systemImage: "globe")) {
                     Picker("Recognition Language", selection: $settings.selectedLanguage) {
                         ForEach(AppSettings.supportedLanguages, id: \.code) { lang in
@@ -101,7 +95,6 @@ struct SettingsView: View {
                     .padding(8)
                 }
 
-                // Behavior
                 GroupBox(label: Label("Behavior", systemImage: "gear")) {
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle("Auto Send after transcription", isOn: $settings.autoSend)
@@ -117,7 +110,7 @@ struct SettingsView: View {
                                 .pickerStyle(.segmented)
                                 .frame(width: 200)
                             }
-                            Text("Match your chat app's send shortcut (e.g. WeChat uses Enter or Cmd+Enter)")
+                            Text("While LLM is refining, press Esc or Cmd+. to cancel. The LLM processing time is your cancel window — no extra delay needed.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -125,70 +118,6 @@ struct SettingsView: View {
                     .padding(8)
                 }
 
-                // Meeting Mode
-                GroupBox(label: Label("Meeting Mode", systemImage: "person.2.fill")) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Auto-detect notes apps", isOn: $settings.meetingModeAutoDetect)
-                        if settings.meetingModeAutoDetect {
-                            LabeledField("My Label", text: $settings.meetingSelfLabel, placeholder: "你")
-                            Text("Detected apps: Notes, Obsidian, Notion, Bear, Craft, Typora, OneNote")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-
-                        Divider()
-
-                        Text("Meeting Server (Tailscale)")
-                            .font(.headline)
-                        LabeledField("Endpoint", text: $settings.meetingServerEndpoint, placeholder: "http://100.x.x.x:8765")
-
-                        HStack {
-                            Text("Speakers")
-                                .frame(width: 80, alignment: .trailing)
-                            Picker("", selection: $settings.meetingNumSpeakers) {
-                                Text("Auto").tag(0)
-                                ForEach(2...10, id: \.self) { n in
-                                    Text("\(n)").tag(n)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .frame(width: 100)
-                        }
-
-                        Toggle("Generate summary", isOn: $settings.meetingSummarize)
-
-                        HStack {
-                            Button("Test Meeting Server") {
-                                NSLog("[Settings] Test Meeting Server clicked, endpoint: '%@'", settings.meetingServerEndpoint)
-                                testMeetingServer()
-                            }
-                                .disabled(isMeetingTesting || settings.meetingServerEndpoint.isEmpty)
-                            if isMeetingTesting { ProgressView().controlSize(.small) }
-                            if !meetingTestResult.isEmpty {
-                                Text(meetingTestResult)
-                                    .font(.caption)
-                                    .foregroundColor(meetingTestResult.contains("OK") ? .green : .red)
-                            }
-                        }
-
-                        Toggle("Speaker diarization (identify who is speaking)", isOn: $settings.meetingDiarization)
-                        if settings.meetingDiarization {
-                            Text("Uses /transcribe/merge — slower (~5s) but shows SPEAKER_00/01 labels")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-
-                        Toggle("Capture system audio (for remote meetings)", isOn: $settings.captureSystemAudio)
-                        if settings.captureSystemAudio {
-                            Text("Requires Screen Recording permission. Captures audio from Zoom, Teams, etc.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(8)
-                }
-
-                // LLM
                 GroupBox(label: Label("LLM Refinement", systemImage: "sparkles")) {
                     VStack(alignment: .leading, spacing: 10) {
                         Toggle("Enable LLM text refinement", isOn: $settings.llmEnabled)
@@ -201,11 +130,17 @@ struct SettingsView: View {
                     .padding(8)
                 }
 
-                // How to use
+                SessionLoggingSection()
+
+                LearningAgentSection()
+
+                AppProfilesSection()
+
                 GroupBox(label: Label("How to Use", systemImage: "keyboard")) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Hold **Fn** key to record, release to transcribe.")
-                        Text("Press **Escape** to cancel. **Cmd+Z** to undo.")
+                        Text("Hold **Fn** to record, release to transcribe.")
+                        Text("While the LLM is refining: **Esc** or **Cmd+.** cancels the whole thing (no paste).")
+                        Text("If a cached result was wrong: menu → **Forget Last Correction**.")
                     }
                     .font(.caption)
                     .padding(8)
@@ -213,7 +148,7 @@ struct SettingsView: View {
             }
             .padding(20)
         }
-        .frame(width: 480, height: 700)
+        .frame(width: 540, height: 700)
     }
 
     private func testConnection() {
@@ -221,35 +156,6 @@ struct SettingsView: View {
         Task {
             let r = await testSTT()
             await MainActor.run { testResult = r; isTesting = false }
-        }
-    }
-
-    private func testMeetingServer() {
-        isMeetingTesting = true; meetingTestResult = ""
-        let endpoint = settings.meetingServerEndpoint
-        Task {
-            // Direct test bypassing MeetingClient to debug
-            let trimmed = endpoint.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            let urlString = "\(trimmed)/health"
-            guard let url = URL(string: urlString) else {
-                await MainActor.run { meetingTestResult = "Invalid URL: \(urlString)"; isMeetingTesting = false }
-                return
-            }
-            var req = URLRequest(url: url)
-            req.timeoutInterval = 5
-            do {
-                let (_, response) = try await URLSession.shared.data(for: req)
-                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                await MainActor.run {
-                    meetingTestResult = code == 200 ? "OK" : "HTTP \(code)"
-                    isMeetingTesting = false
-                }
-            } catch {
-                await MainActor.run {
-                    meetingTestResult = "Error: \(error.localizedDescription)"
-                    isMeetingTesting = false
-                }
-            }
         }
     }
 
@@ -284,5 +190,305 @@ struct LabeledSecureField: View {
     }
     var body: some View {
         HStack { Text(label).frame(width: 80, alignment: .trailing); SecureField(placeholder, text: $text).textFieldStyle(.roundedBorder) }
+    }
+}
+
+// MARK: - Session Logging Section
+
+struct SessionLoggingSection: View {
+    @ObservedObject private var settings = AppSettings.shared
+    @State private var newBlacklist: String = ""
+
+    var body: some View {
+        GroupBox(label: Label("Session History", systemImage: "clock.arrow.circlepath")) {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Record session history", isOn: $settings.sessionLoggingEnabled)
+                Text("Stored locally at ~/.voiceinput/sessions.db. Never uploaded.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                if settings.sessionLoggingEnabled {
+                    HStack {
+                        Text("Retention")
+                            .frame(width: 80, alignment: .trailing)
+                        Picker("", selection: $settings.sessionRetentionDays) {
+                            Text("7 days").tag(7)
+                            Text("30 days").tag(30)
+                            Text("90 days").tag(90)
+                            Text("Forever").tag(0)
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 140)
+                        Button("Purge Now") {
+                            SessionStore.shared.purgeOlderThan(days: settings.sessionRetentionDays)
+                        }
+                        .disabled(settings.sessionRetentionDays == 0)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Excluded apps (bundle IDs — never recorded):")
+                            .font(.caption)
+                        ForEach(settings.sessionBlacklist, id: \.self) { id in
+                            HStack {
+                                Text(id).font(.caption.monospaced())
+                                Spacer()
+                                Button(action: { removeBlacklist(id) }) {
+                                    Image(systemName: "minus.circle")
+                                }
+                                .buttonStyle(.borderless)
+                                .foregroundColor(.secondary)
+                            }
+                        }
+                        HStack {
+                            TextField("com.example.app", text: $newBlacklist)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.caption.monospaced())
+                            Button("Add") { addBlacklist() }
+                                .disabled(newBlacklist.isEmpty)
+                        }
+                    }
+                }
+
+                HStack {
+                    Button("Open Sessions Window") {
+                        SessionsWindowController.shared.show()
+                    }
+                    Spacer()
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    private func addBlacklist() {
+        let t = newBlacklist.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty, !settings.sessionBlacklist.contains(t) else { return }
+        settings.sessionBlacklist.append(t)
+        newBlacklist = ""
+    }
+
+    private func removeBlacklist(_ id: String) {
+        settings.sessionBlacklist.removeAll { $0 == id }
+    }
+}
+
+// MARK: - Learning Agent Section
+
+struct LearningAgentSection: View {
+    @ObservedObject private var settings = AppSettings.shared
+    @State private var runs: [AgentRun] = []
+    @State private var running = false
+
+    var body: some View {
+        GroupBox(label: Label("Learning Agent", systemImage: "brain.head.profile")) {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Auto-learn from recent sessions", isOn: $settings.agentAutoLearnEnabled)
+                Text("The agent analyzes your past voice input logs and teaches the LLM cache recurring corrections + your personal vocabulary. Runs in the background every ~20 new utterances.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                HStack {
+                    Button("Run Now") {
+                        running = true
+                        Task {
+                            await LearningAgent.shared.runL2(reason: "manual")
+                            await MainActor.run {
+                                running = false
+                                reload()
+                            }
+                        }
+                    }
+                    .disabled(running || !settings.isLLMConfigured)
+                    if running { ProgressView().controlSize(.small) }
+                    if !settings.isLLMConfigured {
+                        Text("Requires LLM configured above.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                if !runs.isEmpty {
+                    Divider()
+                    Text("Recent Runs")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    ForEach(runs, id: \.id) { run in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(run.runAt.formatted(.dateTime.month().day().hour().minute()))
+                                    .font(.caption.monospacedDigit())
+                                Text("[\(run.tier)]")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text("+\(run.correctionsAdded) / +\(run.vocabAdded)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            if let s = run.summary {
+                                Text(s)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+            .padding(8)
+        }
+        .onAppear { reload() }
+    }
+
+    private func reload() {
+        runs = SessionStore.shared.recentAgentRuns(limit: 5)
+    }
+}
+
+// MARK: - App Profiles Section
+
+struct AppProfilesSection: View {
+    @State private var profiles: [AppProfile] = []
+    @State private var runningApps: [(bundleID: String, name: String)] = []
+    @State private var selectedAddID: String = ""
+
+    var body: some View {
+        GroupBox(label: Label("App Profiles", systemImage: "app.badge")) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Per-app send key and auto-send override. Default for unknown apps uses Behavior settings above.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                if profiles.isEmpty {
+                    Text("No profiles. Click Reset to add built-in defaults.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.vertical, 8)
+                } else {
+                    VStack(spacing: 4) {
+                        ForEach(profiles, id: \.bundleID) { profile in
+                            AppProfileRow(profile: profile, onChange: { reload() })
+                        }
+                    }
+                }
+
+                Divider()
+
+                HStack {
+                    Picker("Add running app", selection: $selectedAddID) {
+                        Text("Select running app…").tag("")
+                        ForEach(runningApps.filter { app in !profiles.contains { $0.bundleID == app.bundleID } }, id: \.bundleID) { app in
+                            Text(app.name).tag(app.bundleID)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Button("Add") {
+                        addSelected()
+                    }
+                    .disabled(selectedAddID.isEmpty)
+
+                    Spacer()
+
+                    Button("Reset to Defaults") {
+                        AppProfileStore.shared.resetToDefaults()
+                        reload()
+                    }
+                }
+            }
+            .padding(8)
+        }
+        .onAppear {
+            reload()
+            loadRunningApps()
+        }
+    }
+
+    private func reload() {
+        profiles = AppProfileStore.shared.allProfiles()
+    }
+
+    private func loadRunningApps() {
+        runningApps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .compactMap { app -> (String, String)? in
+                guard let id = app.bundleIdentifier, let name = app.localizedName else { return nil }
+                return (id, name)
+            }
+            .sorted { $0.1.lowercased() < $1.1.lowercased() }
+    }
+
+    private func addSelected() {
+        guard !selectedAddID.isEmpty,
+              let app = runningApps.first(where: { $0.bundleID == selectedAddID }) else { return }
+        AppProfileStore.shared.upsert(AppProfile(
+            bundleID: app.bundleID,
+            displayName: app.name,
+            sendKey: AppSettings.shared.sendKey,
+            autoSend: AppSettings.shared.autoSend
+        ))
+        selectedAddID = ""
+        reload()
+    }
+}
+
+struct AppProfileRow: View {
+    let profile: AppProfile
+    let onChange: () -> Void
+
+    @State private var sendKey: SendKeyType
+    @State private var autoSend: Bool
+
+    init(profile: AppProfile, onChange: @escaping () -> Void) {
+        self.profile = profile
+        self.onChange = onChange
+        _sendKey = State(initialValue: profile.sendKey)
+        _autoSend = State(initialValue: profile.autoSend)
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(profile.displayName)
+                .frame(width: 140, alignment: .leading)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Picker("", selection: $sendKey) {
+                ForEach(SendKeyType.allCases, id: \.self) { key in
+                    Text(key.displayName).tag(key)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(width: 110)
+            .onChange(of: sendKey) { _, newValue in
+                save(sendKey: newValue, autoSend: autoSend)
+            }
+
+            Toggle("Auto", isOn: $autoSend)
+                .toggleStyle(.checkbox)
+                .onChange(of: autoSend) { _, newValue in
+                    save(sendKey: sendKey, autoSend: newValue)
+                }
+
+            Spacer()
+
+            Button(action: {
+                AppProfileStore.shared.remove(bundleID: profile.bundleID)
+                onChange()
+            }) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .foregroundColor(.secondary)
+        }
+        .font(.caption)
+    }
+
+    private func save(sendKey: SendKeyType, autoSend: Bool) {
+        var updated = profile
+        updated.sendKey = sendKey
+        updated.autoSend = autoSend
+        AppProfileStore.shared.upsert(updated)
     }
 }

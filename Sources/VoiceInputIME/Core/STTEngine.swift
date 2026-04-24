@@ -7,7 +7,7 @@ protocol STTEngine: AnyObject {
     func stopRecording(context: String) async -> String
 }
 
-enum SendKeyType: String, CaseIterable {
+enum SendKeyType: String, CaseIterable, Codable {
     case enter = "enter"
     case cmdEnter = "cmdEnter"
 

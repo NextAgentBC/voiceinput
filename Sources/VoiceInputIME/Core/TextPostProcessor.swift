@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let postLog = Logger(subsystem: "com.voiceinput.app", category: "TextPost")
 
 final class TextPostProcessor {
     private var dictionary: [String: String] = [:]
@@ -57,7 +60,7 @@ final class TextPostProcessor {
                 dictionary = dict
             }
         } catch {
-            print("Failed to load dictionary: \(error)")
+            postLog.error("Failed to load dictionary: \(error, privacy: .public)")
         }
     }
 
@@ -67,7 +70,7 @@ final class TextPostProcessor {
                 withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: dictionaryURL)
         } catch {
-            print("Failed to save dictionary: \(error)")
+            postLog.error("Failed to save dictionary: \(error, privacy: .public)")
         }
     }
 
@@ -252,7 +255,7 @@ final class TextPostProcessor {
             if dictionary[key] == nil && key.count >= 2 && correct.count >= 1 {
                 dictionary[key] = correct
                 updated = true
-                NSLog("[VoiceInputIME] Auto-learned: \"%@\" → \"%@\"", key, correct)
+                postLog.info("Auto-learned: \(key, privacy: .public) → \(correct, privacy: .public)")
             }
         }
 

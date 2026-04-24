@@ -1,5 +1,8 @@
 import Foundation
 import SQLite3
+import os.log
+
+private let vocabLog = Logger(subsystem: "com.voiceinput.app", category: "VocabDB")
 
 /// SQLite-based vocabulary database with frequency tracking,
 /// fuzzy matching, and auto-learning from AI corrections.
@@ -16,14 +19,15 @@ final class VocabularyDB {
         dbPath = dir.appendingPathComponent("vocabulary.db").path
 
         if sqlite3_open(dbPath, &db) != SQLITE_OK {
-            NSLog("[VocabDB] Failed to open database at %@", dbPath)
+            vocabLog.error("Failed to open database at \(self.dbPath, privacy: .public)")
             return
         }
 
         createTables()
         migrateFromJSON()
+        pruneGarbageEntries()
 
-        NSLog("[VocabDB] Opened at %@, %d entries", dbPath, totalCount())
+        vocabLog.info("Opened at \(self.dbPath, privacy: .public), \(self.totalCount()) entries")
     }
 
     deinit {
@@ -77,18 +81,32 @@ final class VocabularyDB {
         return matches.first?.corrected
     }
 
-    /// Apply all known corrections to a text. Returns corrected text and list of applied corrections.
+    /// Apply all known corrections to a text. For ASCII-only originals
+    /// we use word-boundary regex so "Sub" doesn't match inside "Super".
+    /// Non-ASCII (CJK) originals still use plain substring replacement
+    /// since Chinese has no word boundaries.
     func applyCorrections(_ text: String) -> (text: String, applied: [(original: String, corrected: String)]) {
         var result = text
         var applied: [(String, String)] = []
 
-        // Get all corrections, sorted by original length descending (longest match first)
         let allCorrections = allEntries().sorted { $0.original.count > $1.original.count }
 
         for entry in allCorrections {
-            if result.range(of: entry.original, options: .caseInsensitive) != nil {
-                result = result.replacingOccurrences(of: entry.original, with: entry.corrected, options: .caseInsensitive)
-                applied.append((entry.original, entry.corrected))
+            let isASCII = entry.original.allSatisfy { $0.isASCII }
+            if isASCII {
+                let pattern = "\\b\(NSRegularExpression.escapedPattern(for: entry.original))\\b"
+                if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+                    let range = NSRange(result.startIndex..., in: result)
+                    if regex.firstMatch(in: result, range: range) != nil {
+                        result = regex.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: NSRegularExpression.escapedTemplate(for: entry.corrected))
+                        applied.append((entry.original, entry.corrected))
+                    }
+                }
+            } else {
+                if result.range(of: entry.original, options: .caseInsensitive) != nil {
+                    result = result.replacingOccurrences(of: entry.original, with: entry.corrected, options: .caseInsensitive)
+                    applied.append((entry.original, entry.corrected))
+                }
             }
         }
 
@@ -102,6 +120,22 @@ final class VocabularyDB {
 
         guard !trimOrig.isEmpty, !trimCorr.isEmpty, trimOrig != trimCorr else { return }
         guard trimOrig.count >= 2 else { return } // Skip single char corrections
+
+        // For ASCII originals, require ≥4 chars to avoid learning fragments
+        // like "Sub" that match inside unrelated words ("Super", "Subset").
+        // CJK chars carry more meaning per character so 2 is enough.
+        let isASCII = trimOrig.allSatisfy { $0.isASCII }
+        if isASCII && trimOrig.count < 4 { return }
+
+        // Sanity guard: a vocabulary entry maps one short fragment to another.
+        // If the corrected text contains newlines or is massively longer than
+        // the original, the pair is almost certainly a full-text rewrite, not
+        // a word-level correction. Persisting it causes a cascade: every time
+        // STT produces the short fragment, applyCorrections will explode it
+        // into the whole paragraph.
+        if trimCorr.contains("\n") { return }
+        if trimCorr.count > 60 { return }
+        if trimCorr.count > 4 * max(trimOrig.count, 3) { return }
 
         let sql = """
             INSERT INTO corrections (original, corrected, frequency, confidence, source, last_used)
@@ -123,7 +157,7 @@ final class VocabularyDB {
         }
         sqlite3_finalize(stmt)
 
-        NSLog("[VocabDB] Learned: \"%@\" → \"%@\" (source=%@)", trimOrig, trimCorr, source)
+        vocabLog.info("Learned: \(trimOrig, privacy: .public) → \(trimCorr, privacy: .public) (source=\(source, privacy: .public))")
     }
 
     /// Learn from a full text diff (AI correction result).
@@ -131,6 +165,13 @@ final class VocabularyDB {
     func learnFromDiff(original: String, corrected: String, source: String = "ai") {
         guard original != corrected else { return }
 
+        // Always learn the full pair — guarantees the canonical corrected
+        // form (e.g. "Hubery") enters the vocab verbatim, so contextualStrings
+        // and LLM prompts can use it. Length-sanity guards inside `learn`
+        // handle the "user rewrote everything" case.
+        learn(original: original, corrected: corrected, source: source)
+
+        // Also store any narrower word-level substitutions found in the diff.
         let diffs = extractDifferences(original: original, corrected: corrected)
         for (orig, corr) in diffs {
             learn(original: orig, corrected: corr, source: source)
@@ -171,6 +212,53 @@ final class VocabularyDB {
         }
         sqlite3_finalize(stmt)
         return results
+    }
+
+    /// Return the top-N most frequent CORRECTED terms — feed these to
+    /// SFSpeechRecognizer's `contextualStrings` so Apple Speech has a prior
+    /// on the user's personal vocabulary (names, tech terms, project names).
+    func topCorrectedTerms(limit: Int = 50) -> [String] {
+        var out: [String] = []
+        var seen = Set<String>()
+        let sql = """
+            SELECT corrected FROM corrections
+            GROUP BY corrected
+            ORDER BY SUM(frequency) DESC
+            LIMIT ?;
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_int(stmt, 1, Int32(limit))
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let term = String(cString: sqlite3_column_text(stmt, 0))
+                let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty, !seen.contains(trimmed) else { continue }
+                seen.insert(trimmed)
+                out.append(trimmed)
+            }
+        }
+        sqlite3_finalize(stmt)
+        return out
+    }
+
+    /// Remove entries where the corrected text is absurdly long or multi-line.
+    /// These are historic bad pairs from before the sanity guards in `learn`.
+    private func pruneGarbageEntries() {
+        let sql = """
+            DELETE FROM corrections
+            WHERE LENGTH(corrected) > 60
+               OR corrected LIKE '%' || char(10) || '%';
+        """
+        var err: UnsafeMutablePointer<CChar>?
+        let before = totalCount()
+        if sqlite3_exec(db, sql, nil, nil, &err) != SQLITE_OK {
+            if let msg = err { vocabLog.error("Prune failed: \(String(cString: msg), privacy: .public)") }
+        }
+        sqlite3_free(err)
+        let after = totalCount()
+        if before != after {
+            vocabLog.info("Pruned \(before - after) garbage entries")
+        }
     }
 
     func totalCount() -> Int {
@@ -227,10 +315,10 @@ final class VocabularyDB {
                 for (original, corrected) in dict {
                     learn(original: original, corrected: corrected, source: "manual", confidence: 1.0)
                 }
-                NSLog("[VocabDB] Migrated %d entries from JSON", dict.count)
+                vocabLog.info("Migrated \(dict.count) entries from JSON")
             }
         } catch {
-            NSLog("[VocabDB] JSON migration failed: %@", "\(error)")
+            vocabLog.error("JSON migration failed: \(error, privacy: .public)")
         }
     }
 
@@ -273,7 +361,7 @@ final class VocabularyDB {
         var errMsg: UnsafeMutablePointer<CChar>?
         if sqlite3_exec(db, sql, nil, nil, &errMsg) != SQLITE_OK {
             if let msg = errMsg {
-                NSLog("[VocabDB] SQL error: %@", String(cString: msg))
+                vocabLog.error("SQL error: \(String(cString: msg), privacy: .public)")
                 sqlite3_free(msg)
             }
         }
