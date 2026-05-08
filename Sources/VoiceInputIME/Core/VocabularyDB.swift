@@ -12,17 +12,26 @@ final class VocabularyDB {
     private var db: OpaquePointer?
     private let dbPath: String
 
+    // MARK: - In-memory caches
+    private var entriesCache: [(original: String, corrected: String, frequency: Int, source: String)]? = nil
+    private var topTermsCache: (limit: Int, terms: [String])? = nil
+    private var compiledRegexCache: [String: NSRegularExpression] = [:]
+    private let cacheLock = NSLock()
+
     private init() {
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".voiceinput")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o700)], ofItemAtPath: dir.path)
         dbPath = dir.appendingPathComponent("vocabulary.db").path
 
         if sqlite3_open(dbPath, &db) != SQLITE_OK {
             vocabLog.error("Failed to open database at \(self.dbPath, privacy: .public)")
             return
         }
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: dbPath)
 
+        applyPragmas()
         createTables()
         migrateFromJSON()
         pruneGarbageEntries()
@@ -32,6 +41,49 @@ final class VocabularyDB {
 
     deinit {
         sqlite3_close(db)
+    }
+
+    private func invalidateCaches() {
+        cacheLock.lock()
+        entriesCache = nil
+        topTermsCache = nil
+        compiledRegexCache = [:]
+        cacheLock.unlock()
+    }
+
+    private func cachedEntries() -> [(original: String, corrected: String, frequency: Int, source: String)] {
+        cacheLock.lock()
+        if let cached = entriesCache {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+        let fetched = allEntries()
+        cacheLock.lock()
+        entriesCache = fetched
+        cacheLock.unlock()
+        return fetched
+    }
+
+    // MARK: - Pragmas + Transaction
+
+    private func applyPragmas() {
+        sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA temp_store=MEMORY;", nil, nil, nil)
+
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "PRAGMA journal_mode=WAL;", -1, &stmt, nil) == SQLITE_OK,
+           sqlite3_step(stmt) == SQLITE_ROW,
+           let cStr = sqlite3_column_text(stmt, 0) {
+            vocabLog.info("journal_mode=\(String(cString: cStr), privacy: .public)")
+        }
+        sqlite3_finalize(stmt)
+    }
+
+    private func transaction(_ work: () -> Void) {
+        sqlite3_exec(db, "BEGIN IMMEDIATE TRANSACTION;", nil, nil, nil)
+        work()
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
     }
 
     // MARK: - Schema
@@ -89,13 +141,26 @@ final class VocabularyDB {
         var result = text
         var applied: [(String, String)] = []
 
-        let allCorrections = allEntries().sorted { $0.original.count > $1.original.count }
+        let allCorrections = cachedEntries().sorted { $0.original.count > $1.original.count }
 
         for entry in allCorrections {
             let isASCII = entry.original.allSatisfy { $0.isASCII }
             if isASCII {
-                let pattern = "\\b\(NSRegularExpression.escapedPattern(for: entry.original))\\b"
-                if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+                cacheLock.lock()
+                let regex: NSRegularExpression?
+                if let cached = compiledRegexCache[entry.original] {
+                    regex = cached
+                    cacheLock.unlock()
+                } else {
+                    cacheLock.unlock()
+                    let pattern = "\\b\(NSRegularExpression.escapedPattern(for: entry.original))\\b"
+                    let compiled = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive)
+                    cacheLock.lock()
+                    if let compiled = compiled { compiledRegexCache[entry.original] = compiled }
+                    cacheLock.unlock()
+                    regex = compiled
+                }
+                if let regex = regex {
                     let range = NSRange(result.startIndex..., in: result)
                     if regex.firstMatch(in: result, range: range) != nil {
                         result = regex.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: NSRegularExpression.escapedTemplate(for: entry.corrected))
@@ -154,10 +219,22 @@ final class VocabularyDB {
             sqlite3_bind_text(stmt, 4, (source as NSString).utf8String, -1, nil)
             sqlite3_bind_double(stmt, 5, confidence)
             sqlite3_step(stmt)
+            invalidateCaches()
         }
         sqlite3_finalize(stmt)
 
-        vocabLog.info("Learned: \(trimOrig, privacy: .public) → \(trimCorr, privacy: .public) (source=\(source, privacy: .public))")
+        vocabLog.info("Learned: \(trimOrig, privacy: .private) → \(trimCorr, privacy: .private) (source=\(source, privacy: .public))")
+    }
+
+    /// Learn multiple (alias → term) pairs in one transaction.
+    /// Used by LearningAgent to batch-insert without per-call transaction overhead.
+    func learnBatch(_ pairs: [(original: String, corrected: String, source: String, confidence: Double)]) {
+        guard !pairs.isEmpty else { return }
+        transaction {
+            for pair in pairs {
+                learn(original: pair.original, corrected: pair.corrected, source: pair.source, confidence: pair.confidence)
+            }
+        }
     }
 
     /// Learn from a full text diff (AI correction result).
@@ -165,16 +242,18 @@ final class VocabularyDB {
     func learnFromDiff(original: String, corrected: String, source: String = "ai") {
         guard original != corrected else { return }
 
-        // Always learn the full pair — guarantees the canonical corrected
-        // form (e.g. "Hubery") enters the vocab verbatim, so contextualStrings
-        // and LLM prompts can use it. Length-sanity guards inside `learn`
-        // handle the "user rewrote everything" case.
-        learn(original: original, corrected: corrected, source: source)
-
-        // Also store any narrower word-level substitutions found in the diff.
         let diffs = extractDifferences(original: original, corrected: corrected)
-        for (orig, corr) in diffs {
-            learn(original: orig, corrected: corr, source: source)
+        transaction {
+            // Always learn the full pair — guarantees the canonical corrected
+            // form (e.g. "Hubery") enters the vocab verbatim, so contextualStrings
+            // and LLM prompts can use it. Length-sanity guards inside `learn`
+            // handle the "user rewrote everything" case.
+            learn(original: original, corrected: corrected, source: source)
+
+            // Also store any narrower word-level substitutions found in the diff.
+            for (orig, corr) in diffs {
+                learn(original: orig, corrected: corr, source: source)
+            }
         }
     }
 
@@ -218,6 +297,14 @@ final class VocabularyDB {
     /// SFSpeechRecognizer's `contextualStrings` so Apple Speech has a prior
     /// on the user's personal vocabulary (names, tech terms, project names).
     func topCorrectedTerms(limit: Int = 50) -> [String] {
+        cacheLock.lock()
+        if let cached = topTermsCache, cached.limit == limit {
+            let terms = cached.terms
+            cacheLock.unlock()
+            return terms
+        }
+        cacheLock.unlock()
+
         var out: [String] = []
         var seen = Set<String>()
         let sql = """
@@ -238,6 +325,10 @@ final class VocabularyDB {
             }
         }
         sqlite3_finalize(stmt)
+
+        cacheLock.lock()
+        topTermsCache = (limit: limit, terms: out)
+        cacheLock.unlock()
         return out
     }
 
@@ -258,6 +349,7 @@ final class VocabularyDB {
         let after = totalCount()
         if before != after {
             vocabLog.info("Pruned \(before - after) garbage entries")
+            invalidateCaches()
         }
     }
 
@@ -281,6 +373,7 @@ final class VocabularyDB {
             sqlite3_bind_text(stmt, 1, (original as NSString).utf8String, -1, nil)
             sqlite3_bind_text(stmt, 2, (corrected as NSString).utf8String, -1, nil)
             sqlite3_step(stmt)
+            invalidateCaches()
         }
         sqlite3_finalize(stmt)
     }
@@ -296,6 +389,7 @@ final class VocabularyDB {
             sqlite3_bind_int(stmt, 1, Int32(minFrequency))
             sqlite3_bind_int(stmt, 2, Int32(olderThanDays))
             sqlite3_step(stmt)
+            if sqlite3_changes(db) > 0 { invalidateCaches() }
         }
         sqlite3_finalize(stmt)
     }

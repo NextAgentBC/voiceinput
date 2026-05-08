@@ -7,10 +7,10 @@ private let cloudLog = Logger(subsystem: "com.voiceinput.app", category: "CloudS
 /// Cloud-based STT engine. Sends recorded audio to a remote API endpoint.
 final class CloudSTTEngine: STTEngine {
     var onAudioLevel: ((Float) -> Void)?
+    var onPartialTranscript: ((String) -> Void)?
 
-    private var audioEngine: AVAudioEngine?
+    private var capture = AudioCaptureSession()
     private var isRecording = false
-    private var tapInstalled = false
     private var recordingStartTime: TimeInterval = 0
     private var pcmData = Data()
     private let pcmLock = NSLock()
@@ -23,55 +23,59 @@ final class CloudSTTEngine: STTEngine {
         guard !isRecording else { return }
         recordingLanguage = language
 
-        let engine = AVAudioEngine()
-        audioEngine = engine
-
         pcmLock.lock()
         pcmData = Data()
         pcmLock.unlock()
 
-        let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0 else { throw STTError.noInputDevice }
-
         let outFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
-        guard let conv = AVAudioConverter(from: inputFormat, to: outFormat) else { throw STTError.noInputDevice }
+
+        var setupError: Error?
+        var captureConverter: AVAudioConverter?
+
+        let cfg = AudioCaptureSession.Config(
+            onBuffer: { [weak self] buffer, inputFormat in
+                guard let self = self, self.isRecording else { return }
+                guard let conv = captureConverter else { return }
+                let ratio = outFormat.sampleRate / inputFormat.sampleRate
+                let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1
+                guard let outBuf = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
+
+                var error: NSError?
+                var consumed = false
+                conv.convert(to: outBuf, error: &error) { _, status in
+                    if consumed { status.pointee = .noDataNow; return nil }
+                    consumed = true
+                    status.pointee = .haveData
+                    return buffer
+                }
+
+                if error == nil, outBuf.frameLength > 0, let ptr = outBuf.int16ChannelData {
+                    let raw = Data(bytes: ptr.pointee, count: Int(outBuf.frameLength) * 2)
+                    self.pcmLock.lock()
+                    self.pcmData.append(raw)
+                    self.pcmLock.unlock()
+                }
+            },
+            onLevel: { [weak self] level in
+                self?.onAudioLevel?(level)
+            },
+            bufferSize: 4096
+        )
+
+        let inputFormat = try capture.start(config: cfg)
+        guard let conv = AVAudioConverter(from: inputFormat, to: outFormat) else {
+            capture.stop()
+            throw STTError.noInputDevice
+        }
+        captureConverter = conv
         converter = conv
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
-            guard let self = self, self.isRecording else { return }
-            let level = self.rms(buffer)
-            let ratio = outFormat.sampleRate / inputFormat.sampleRate
-            let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1
-            guard let outBuf = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
-
-            var error: NSError?
-            var consumed = false
-            conv.convert(to: outBuf, error: &error) { _, status in
-                if consumed { status.pointee = .noDataNow; return nil }
-                consumed = true
-                status.pointee = .haveData
-                return buffer
-            }
-
-            if error == nil, outBuf.frameLength > 0, let ptr = outBuf.int16ChannelData {
-                let raw = Data(bytes: ptr.pointee, count: Int(outBuf.frameLength) * 2)
-                self.pcmLock.lock()
-                self.pcmData.append(raw)
-                self.pcmLock.unlock()
-            }
-            DispatchQueue.main.async { self.onAudioLevel?(level) }
-        }
-        tapInstalled = true
-
-        engine.prepare()
-        try engine.start()
         isRecording = true
         recordingStartTime = ProcessInfo.processInfo.systemUptime
     }
 
-    func stopRecording(context: String) async -> String {
-        guard let wavData = stopRecordingRaw() else { return "" }
+    func stopRecording(context: String) async -> Result<String, STTError> {
+        guard let wavData = stopRecordingRaw() else { return .success("") }
         return await transcribeWithRetry(wavData, context: context)
     }
 
@@ -79,11 +83,7 @@ final class CloudSTTEngine: STTEngine {
         guard isRecording else { return nil }
         isRecording = false
 
-        if let engine = audioEngine {
-            if tapInstalled { engine.inputNode.removeTap(onBus: 0); tapInstalled = false }
-            engine.stop()
-        }
-        audioEngine = nil
+        capture.stop()
         converter = nil
 
         pcmLock.lock()
@@ -123,21 +123,29 @@ final class CloudSTTEngine: STTEngine {
 
     // MARK: - API
 
-    private func transcribeWithRetry(_ audioData: Data, context: String) async -> String {
+    private func transcribeWithRetry(_ audioData: Data, context: String) async -> Result<String, STTError> {
+        var lastError: STTError = .engineUnavailable
         for attempt in 1...3 {
             let result = await transcribe(audioData, context: context)
-            if !result.isEmpty { return result }
-            cloudLog.warning("Attempt \(attempt)/3 failed, retrying...")
-            try? await Task.sleep(nanoseconds: UInt64(attempt) * 300_000_000)
+            switch result {
+            case .success(let text):
+                if !text.isEmpty { return .success(text) }
+                return .success(text)
+            case .failure(let err):
+                lastError = err
+                if case .notConfigured = err { return .failure(err) }
+                cloudLog.warning("Attempt \(attempt)/3 failed: \(err.userMessage, privacy: .public), retrying…")
+                try? await Task.sleep(nanoseconds: UInt64(attempt) * 300_000_000)
+            }
         }
-        return ""
+        return .failure(lastError)
     }
 
-    private func transcribe(_ audioData: Data, context: String) async -> String {
+    private func transcribe(_ audioData: Data, context: String) async -> Result<String, STTError> {
         let settings = AppSettings.shared
         guard !settings.sttEndpoint.isEmpty, !settings.sttAPIKey.isEmpty else {
             cloudLog.error("No endpoint or API key configured")
-            return ""
+            return .failure(.notConfigured)
         }
 
         let boundary = "Boundary-\(UUID().uuidString)"
@@ -158,7 +166,9 @@ final class CloudSTTEngine: STTEngine {
         body.append(audioData)
         append("\r\n--\(boundary)--\r\n")
 
-        guard let url = URL(string: settings.sttEndpoint) else { return "" }
+        guard let url = URL(string: settings.sttEndpoint) else {
+            return .failure(.notConfigured)
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("Bearer \(settings.sttAPIKey)", forHTTPHeaderField: "Authorization")
@@ -171,34 +181,19 @@ final class CloudSTTEngine: STTEngine {
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard code == 200 else {
                 cloudLog.error("HTTP \(code)")
-                return ""
+                return .failure(.http(code))
             }
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let text = json["text"] as? String {
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                cloudLog.info("result: \(trimmed, privacy: .public)")
-                return trimmed
+                cloudLog.info("result: \(trimmed, privacy: .private)")
+                return .success(trimmed)
             }
+            cloudLog.error("Failed to parse STT response")
+            return .failure(.parseFailure)
         } catch {
             cloudLog.error("\(error, privacy: .public)")
+            return .failure(.network(error.localizedDescription))
         }
-        return ""
     }
-
-    // MARK: - Audio
-
-    private func rms(_ buffer: AVAudioPCMBuffer) -> Float {
-        guard let data = buffer.floatChannelData else { return 0 }
-        let n = Int(buffer.frameLength)
-        guard n > 0 else { return 0 }
-        var sum: Float = 0
-        let p = data.pointee
-        for i in 0..<n { sum += p[i] * p[i] }
-        return min(sqrt(sum / Float(n)) * 5.0, 1.0)
-    }
-}
-
-enum STTError: LocalizedError {
-    case noInputDevice
-    var errorDescription: String? { "No audio input device available." }
 }

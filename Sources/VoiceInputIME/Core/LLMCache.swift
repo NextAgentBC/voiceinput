@@ -19,19 +19,36 @@ final class LLMCache {
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".voiceinput")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o700)], ofItemAtPath: dir.path)
         dbPath = dir.appendingPathComponent("llm_cache.db").path
 
         if sqlite3_open(dbPath, &db) != SQLITE_OK {
             cacheLog.error("Failed to open cache at \(self.dbPath, privacy: .public)")
             return
         }
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: dbPath)
 
+        applyPragmas()
         createTable()
         pruneSuspiciousEntries()
         cacheLog.info("Opened at \(self.dbPath, privacy: .public), \(self.count()) entries")
     }
 
     deinit { sqlite3_close(db) }
+
+    private func applyPragmas() {
+        sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA temp_store=MEMORY;", nil, nil, nil)
+
+        // Set WAL and read back the actual mode.
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "PRAGMA journal_mode=WAL;", -1, &stmt, nil) == SQLITE_OK,
+           sqlite3_step(stmt) == SQLITE_ROW,
+           let cStr = sqlite3_column_text(stmt, 0) {
+            cacheLog.info("journal_mode=\(String(cString: cStr), privacy: .public)")
+        }
+        sqlite3_finalize(stmt)
+    }
 
     private func createTable() {
         let sql = """
@@ -61,12 +78,15 @@ final class LLMCache {
         }
     }
 
-    /// Clean up entries where `refined_text` is wildly longer than
-    /// `raw_text` — those are poisoned rewrites, not corrections.
+    /// Clean up entries that are obviously corrupt: multi-line, way too long,
+    /// or wildly longer than the raw_text (those are poisoned rewrites, not
+    /// corrections — see `put` for the symmetric write-side guards).
     private func pruneSuspiciousEntries() {
         let sql = """
             DELETE FROM llm_cache
-            WHERE LENGTH(refined_text) > MAX(LENGTH(raw_text) * 3, LENGTH(raw_text) + 80);
+            WHERE refined_text LIKE '%' || char(10) || '%'
+               OR LENGTH(refined_text) > 200
+               OR LENGTH(refined_text) > LENGTH(raw_text) * 4;
         """
         sqlite3_exec(db, sql, nil, nil, nil)
     }
@@ -138,11 +158,8 @@ final class LLMCache {
     @discardableResult
     func put(raw: String, refined: String, model: String, lang: String) -> String {
         let key = cacheKey(raw: raw, model: model, lang: lang)
-        // Sanity guard: a refined text that's vastly longer than the raw is
-        // almost always a full rewrite, not a STT correction. Storing it
-        // means next time the same raw shows up we paste a paragraph.
-        if refined.count > max(raw.count * 3, raw.count + 80) {
-            cacheLog.warning("Refused to cache (refined much longer than raw)")
+        if let reason = poisonReason(raw: raw, refined: refined) {
+            cacheLog.warning("Refused to cache: \(reason, privacy: .public)")
             return key
         }
         queue.async {
@@ -201,7 +218,116 @@ final class LLMCache {
         }
     }
 
+    // MARK: - Inspector API
+
+    struct CacheStats {
+        let totalEntries: Int
+        let totalBytes: Int
+        let totalHits: Int
+        let lastHitAge: TimeInterval?
+    }
+
+    func stats() -> CacheStats {
+        queue.sync {
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            let sql = "SELECT COUNT(*), SUM(LENGTH(raw_text)+LENGTH(refined_text)), SUM(hit_count), MAX(last_hit) FROM llm_cache;"
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK,
+                  sqlite3_step(stmt) == SQLITE_ROW else {
+                return CacheStats(totalEntries: 0, totalBytes: 0, totalHits: 0, lastHitAge: nil)
+            }
+            let entries = Int(sqlite3_column_int(stmt, 0))
+            let bytes   = Int(sqlite3_column_int(stmt, 1))
+            let hits    = Int(sqlite3_column_int(stmt, 2))
+            let lastHit: TimeInterval? = entries > 0
+                ? Date().timeIntervalSince1970 - sqlite3_column_double(stmt, 3)
+                : nil
+            return CacheStats(totalEntries: entries, totalBytes: bytes, totalHits: hits, lastHitAge: lastHit)
+        }
+    }
+
+    struct CacheRow: Identifiable {
+        let id: String
+        let key: String
+        let raw: String
+        let refined: String
+        let hits: Int
+        let createdAt: Date
+        let lastHit: Date
+
+        init(key: String, raw: String, refined: String, hits: Int, createdAt: Date, lastHit: Date) {
+            self.id = key
+            self.key = key
+            self.raw = raw
+            self.refined = refined
+            self.hits = hits
+            self.createdAt = createdAt
+            self.lastHit = lastHit
+        }
+    }
+
+    func topRows(limit: Int = 10) -> [CacheRow] {
+        queue.sync {
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            let sql = "SELECT key, raw_text, refined_text, hit_count, created_at, last_hit FROM llm_cache ORDER BY hit_count DESC LIMIT ?;"
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            sqlite3_bind_int(stmt, 1, Int32(limit))
+            var rows: [CacheRow] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let keyC = sqlite3_column_text(stmt, 0),
+                      let rawC = sqlite3_column_text(stmt, 1),
+                      let refC = sqlite3_column_text(stmt, 2) else { continue }
+                rows.append(CacheRow(
+                    key:       String(cString: keyC),
+                    raw:       String(cString: rawC),
+                    refined:   String(cString: refC),
+                    hits:      Int(sqlite3_column_int(stmt, 3)),
+                    createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4)),
+                    lastHit:   Date(timeIntervalSince1970: sqlite3_column_double(stmt, 5))
+                ))
+            }
+            return rows
+        }
+    }
+
+    @discardableResult
+    func deletePoisoned() -> Int {
+        queue.sync {
+            let sql = """
+                DELETE FROM llm_cache
+                WHERE refined_text LIKE '%' || char(10) || '%'
+                   OR LENGTH(refined_text) > 200
+                   OR LENGTH(refined_text) > LENGTH(raw_text) * 4;
+            """
+            sqlite3_exec(db, sql, nil, nil, nil)
+            return Int(sqlite3_changes(db))
+        }
+    }
+
     // MARK: - Private
+
+    /// Returns a human-readable reason if the (raw, refined) pair looks like
+    /// a poisoned rewrite that must NOT be cached, or nil if it's clean.
+    /// Caller logs the reason and bails. Mirror of the SQL purge in
+    /// `pruneSuspiciousEntries`, plus a self-replication check.
+    private func poisonReason(raw: String, refined: String) -> String? {
+        if refined.contains("\n") { return "contains newline" }
+        if refined.count > 200 { return "refined too long (\(refined.count))" }
+        if refined.count > raw.count * 4 { return "refined > 4x raw" }
+        let trimmedRaw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedRaw.count >= 2 {
+            // Count non-overlapping occurrences of the raw inside refined.
+            var search = refined[...]
+            var occurrences = 0
+            while let r = search.range(of: trimmedRaw, options: .caseInsensitive) {
+                occurrences += 1
+                if occurrences >= 2 { return "raw appears >= 2 times in refined" }
+                search = search[r.upperBound...]
+            }
+        }
+        return nil
+    }
 
     private func bumpHit(key: String) {
         let sql = "UPDATE llm_cache SET hit_count = hit_count + 1, last_hit = ? WHERE key = ?;"

@@ -6,13 +6,14 @@ private let whisperLog = Logger(subsystem: "com.voiceinput.app", category: "Whis
 /// Local Whisper STT engine (placeholder — not yet implemented).
 final class WhisperEngine: STTEngine {
     var onAudioLevel: ((Float) -> Void)?
+    var onPartialTranscript: ((String) -> Void)?
 
     func startRecording(language: String) throws {
         whisperLog.error("Local Whisper engine is not yet available")
         throw STTError.noInputDevice
     }
 
-    func stopRecording(context: String) async -> String {
-        return ""
+    func stopRecording(context: String) async -> Result<String, STTError> {
+        return .failure(.engineUnavailable)
     }
 }

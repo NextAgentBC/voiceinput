@@ -55,19 +55,41 @@ final class SessionStore {
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".voiceinput")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o700)], ofItemAtPath: dir.path)
         dbPath = dir.appendingPathComponent("sessions.db").path
 
         if sqlite3_open(dbPath, &db) != SQLITE_OK {
             sessionLog.error("Failed to open database at \(self.dbPath, privacy: .public)")
             return
         }
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: dbPath)
 
+        applyPragmas()
         createTables()
         sessionLog.info("Opened at \(self.dbPath, privacy: .public)")
     }
 
     deinit {
         sqlite3_close(db)
+    }
+
+    private func applyPragmas() {
+        sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA temp_store=MEMORY;", nil, nil, nil)
+
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "PRAGMA journal_mode=WAL;", -1, &stmt, nil) == SQLITE_OK,
+           sqlite3_step(stmt) == SQLITE_ROW,
+           let cStr = sqlite3_column_text(stmt, 0) {
+            sessionLog.info("journal_mode=\(String(cString: cStr), privacy: .public)")
+        }
+        sqlite3_finalize(stmt)
+    }
+
+    private func transaction(_ work: () -> Void) {
+        sqlite3_exec(db, "BEGIN IMMEDIATE TRANSACTION;", nil, nil, nil)
+        work()
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
     }
 
     private func createTables() {
@@ -133,18 +155,21 @@ final class SessionStore {
         }
 
         return queue.sync { () -> String? in
-            let sessionID = resolveOrCreateSession(
-                appBundleID: appBundleID,
-                appDisplayName: appDisplayName,
-                at: date
-            )
-            insertEntry(
-                sessionID: sessionID,
-                timestamp: date,
-                rawText: rawText,
-                finalText: finalText,
-                wasCancelled: wasCancelled
-            )
+            var sessionID = ""
+            transaction {
+                sessionID = resolveOrCreateSession(
+                    appBundleID: appBundleID,
+                    appDisplayName: appDisplayName,
+                    at: date
+                )
+                insertEntry(
+                    sessionID: sessionID,
+                    timestamp: date,
+                    rawText: rawText,
+                    finalText: finalText,
+                    wasCancelled: wasCancelled
+                )
+            }
             return sessionID
         }
     }

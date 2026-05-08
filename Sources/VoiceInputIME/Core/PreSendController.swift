@@ -48,7 +48,7 @@ final class PreSendController {
         preSendLog.info("cancel (user=\(userInitiated, privacy: .public))")
         cancelTimerOnly()
         if userInitiated {
-            RecordingSession.shared.reportUserCancelledSend()
+            MainActor.assumeIsolated { RecordingSession.shared.reportUserCancelledSend() }
         }
     }
 
@@ -69,7 +69,7 @@ final class PreSendController {
         timer = nil
 
         // Learn from any user edits to the pasted text before sending.
-        RecordingSession.shared.learnFromUserEditIfAny()
+        MainActor.assumeIsolated { RecordingSession.shared.learnFromUserEditIfAny() }
 
         let src = CGEventSource(stateID: .combinedSessionState)
         let useCmd = pendingSendKey == .cmdEnter
@@ -82,9 +82,9 @@ final class PreSendController {
             u.post(tap: .cgAnnotatedSessionEventTap)
         }
 
-        // The accepted-send bookkeeping also clears lastPastedText, so even
+        // The accepted-send bookkeeping also clears utterance state, so even
         // if our Enter bounces through the tap, there's nothing to diff.
-        RecordingSession.shared.reportAcceptedSend()
+        MainActor.assumeIsolated { RecordingSession.shared.reportAcceptedSend() }
 
         // Keep the isFiring flag up long enough to cover the round-trip of
         // our synthetic Enter through the event tap.

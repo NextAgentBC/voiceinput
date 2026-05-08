@@ -69,6 +69,7 @@ final class TextPostProcessor {
             let data = try JSONSerialization.data(
                 withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: dictionaryURL)
+            try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: dictionaryURL.path)
         } catch {
             postLog.error("Failed to save dictionary: \(error, privacy: .public)")
         }
@@ -230,6 +231,7 @@ final class TextPostProcessor {
         if !FileManager.default.fileExists(atPath: dir.path) {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o700)], ofItemAtPath: dir.path)
     }
 
     var dictionaryPath: String {
@@ -255,7 +257,7 @@ final class TextPostProcessor {
             if dictionary[key] == nil && key.count >= 2 && correct.count >= 1 {
                 dictionary[key] = correct
                 updated = true
-                postLog.info("Auto-learned: \(key, privacy: .public) → \(correct, privacy: .public)")
+                postLog.info("Auto-learned: \(key, privacy: .private) → \(correct, privacy: .private)")
             }
         }
 

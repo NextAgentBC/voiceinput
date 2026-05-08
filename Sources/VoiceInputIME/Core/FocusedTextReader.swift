@@ -9,7 +9,7 @@ private let axLog = Logger(subsystem: "com.voiceinput.app", category: "FocusedTe
 /// surfaces) tend to return nil. Callers must tolerate failure.
 enum FocusedTextReader {
 
-    /// Return the text in the currently focused UI element, or nil if unavailable.
+/// Return the text in the currently focused UI element, or nil if unavailable.
     static func read() -> String? {
         let systemWide = AXUIElementCreateSystemWide()
         var focused: CFTypeRef?

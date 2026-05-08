@@ -5,17 +5,56 @@ private let logger = Logger(subsystem: "com.voiceinput.app", category: "App")
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
+    private var lastSTTErrorDate: Date?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         logger.info("applicationDidFinishLaunching")
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        updateStatusBarIcon()
         statusItem.menu = buildMenu()
 
+        // Toggle-mode hotkey: tap once to start recording, tap again to stop.
+        // Hold-to-talk (the original behaviour) was awkward with the Fn+Ctrl
+        // combo and caused fatigue for long utterances. We ignore the up
+        // transition and only act on each fresh press.
         let hotkey = GlobalHotkey.shared
-        hotkey.onHotkeyDown = { RecordingSession.shared.startRecording() }
-        hotkey.onHotkeyUp = { RecordingSession.shared.stopRecording() }
+        hotkey.onHotkeyDown = {
+            let rec = RecordingSession.shared
+            if rec.isRecording {
+                rec.stopRecording()
+            } else {
+                rec.startRecording()
+            }
+        }
+        hotkey.onHotkeyUp = { /* no-op in toggle mode */ }
         hotkey.install()
+
+        requestPermissionsIfNeeded()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSTTError(_:)),
+            name: .voiceInputSTTError,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleStateChanged),
+            name: .voiceInputStateChanged,
+            object: nil
+        )
+
+        refreshStatusBarIcon()
+
+        // If audio capture was on at last quit, resume on launch.
+        let s = AppSettings.shared
+        if s.audioCaptureEnabled, !s.audioCaptureFolderPath.isEmpty {
+            do {
+                try AudioRecorder.shared.start(folder: URL(fileURLWithPath: s.audioCaptureFolderPath))
+            } catch {
+                logger.error("Audio capture auto-start failed: \(error.localizedDescription, privacy: .public)")
+                s.audioCaptureEnabled = false
+            }
+        }
 
         if !AppSettings.shared.isSTTConfigured {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -26,14 +65,121 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         logger.info("Menu bar app started")
     }
 
+    // MARK: - Permissions
+
+    private var permissionAlertShown = false
+
+    private func requestPermissionsIfNeeded() {
+        let micStatus = PermissionsManager.microphoneStatus()
+        let speechStatus = PermissionsManager.speechRecognitionStatus()
+
+        let group = DispatchGroup()
+        var micDenied = false
+        var speechDenied = false
+
+        if micStatus == .undetermined {
+            group.enter()
+            PermissionsManager.requestMicrophone { granted in
+                micDenied = !granted
+                group.leave()
+            }
+        } else {
+            micDenied = (micStatus == .denied)
+        }
+
+        if speechStatus == .undetermined {
+            group.enter()
+            PermissionsManager.requestSpeechRecognition { granted in
+                speechDenied = !granted
+                group.leave()
+            }
+        } else {
+            speechDenied = (speechStatus == .denied)
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.refreshStatusBarIcon()
+                guard !self!.permissionAlertShown else { return }
+                if micDenied || speechDenied {
+                    self?.permissionAlertShown = true
+                    self?.showPermissionDeniedAlert(mic: micDenied, speech: speechDenied)
+                }
+            }
+        }
+    }
+
+    private func showPermissionDeniedAlert(mic: Bool, speech: Bool) {
+        let alert = NSAlert()
+        alert.messageText = "Voice Input needs permission to work"
+        if mic && speech {
+            alert.informativeText = "Voice Input needs Microphone and Speech Recognition access to record and transcribe your voice."
+        } else if mic {
+            alert.informativeText = "Voice Input needs Microphone access to record."
+        } else {
+            alert.informativeText = "Voice Input needs Speech Recognition access to transcribe."
+        }
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Later")
+        alert.alertStyle = .warning
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            PermissionsManager.openSystemSettings(for: mic ? .microphone : .speechRecognition)
+        }
+    }
+
     // MARK: - Status Bar Icon
 
-    private func updateStatusBarIcon() {
-        if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Voice Input")
-            button.image?.size = NSSize(width: 16, height: 16)
-            button.image?.isTemplate = true
+    @objc private func handleSTTError(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            lastSTTErrorDate = Date()
+            refreshStatusBarIcon()
         }
+        // Clear the warning icon after 60s.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+            MainActor.assumeIsolated { self?.refreshStatusBarIcon() }
+        }
+    }
+
+    @objc private func handleStateChanged() {
+        MainActor.assumeIsolated { refreshStatusBarIcon() }
+    }
+
+    @MainActor func refreshStatusBarIcon() {
+        guard let button = statusItem.button else { return }
+
+        let micStatus = PermissionsManager.microphoneStatus()
+        let axStatus = PermissionsManager.accessibilityStatus()
+
+        if micStatus == .denied || axStatus == .denied {
+            button.image = NSImage(systemSymbolName: "mic.slash.fill", accessibilityDescription: "Voice Input — permission denied")
+            button.image?.isTemplate = false
+            button.contentTintColor = .systemRed
+            return
+        }
+
+        let recentError = lastSTTErrorDate.map { Date().timeIntervalSince($0) < 60 } ?? false
+        let notConfigured = !AppSettings.shared.isSTTConfigured
+
+        if notConfigured || recentError {
+            button.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Voice Input — configuration issue")
+            button.image?.isTemplate = false
+            button.contentTintColor = .systemYellow
+            return
+        }
+
+        let session = RecordingSession.shared
+        if session.isRecording || session.isRefining {
+            button.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Voice Input — recording")
+            button.image?.isTemplate = false
+            button.contentTintColor = .systemGreen
+            return
+        }
+
+        // Idle, all good — plain template icon.
+        button.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Voice Input")
+        button.image?.isTemplate = true
+        button.contentTintColor = nil
     }
 
     // MARK: - Menu
@@ -46,7 +192,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
-        let sessionsItem = NSMenuItem(title: "Sessions...", action: #selector(openSessions), keyEquivalent: "h")
+        let sessionsItem = NSMenuItem(title: "Sessions...", action: #selector(openSessions), keyEquivalent: "")
         sessionsItem.target = self
         menu.addItem(sessionsItem)
 
@@ -94,6 +240,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        // Audio capture (continuous background recording, 1-min rotation).
+        let audioItem = NSMenuItem(title: "Record Audio to File", action: #selector(toggleAudioCapture(_:)), keyEquivalent: "")
+        audioItem.target = self
+        audioItem.state = settings.audioCaptureEnabled ? .on : .off
+        menu.addItem(audioItem)
+
+        let folderTitle: String = {
+            let path = settings.audioCaptureFolderPath
+            if path.isEmpty { return "Audio Folder: (not set)" }
+            return "Audio Folder: \((path as NSString).abbreviatingWithTildeInPath)"
+        }()
+        let folderItem = NSMenuItem(title: folderTitle, action: #selector(chooseAudioFolder), keyEquivalent: "")
+        folderItem.target = self
+        folderItem.toolTip = "Click to choose where rolling audio files (one per minute) are saved."
+        menu.addItem(folderItem)
+
+        menu.addItem(.separator())
+
         let status = settings.isSTTConfigured ? "STT: Connected" : "STT: Not configured"
         let sttStatusItem = NSMenuItem(title: status, action: nil, keyEquivalent: "")
         sttStatusItem.isEnabled = false
@@ -101,9 +265,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let howToItem = NSMenuItem(title: "Hold Fn to record", action: nil, keyEquivalent: "")
+        let howToItem = NSMenuItem(title: "Tap Fn+Ctrl to start, tap again to stop", action: nil, keyEquivalent: "")
         howToItem.isEnabled = false
         menu.addItem(howToItem)
+
+        let cancelHintItem = NSMenuItem(title: "Esc / Cmd+. cancels during refining", action: nil, keyEquivalent: "")
+        cancelHintItem.isEnabled = false
+        menu.addItem(cancelHintItem)
 
         menu.addItem(.separator())
 
@@ -144,10 +312,70 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func forgetLastCorrection() {
-        RecordingSession.shared.rejectLastCacheKey()
+        MainActor.assumeIsolated { RecordingSession.shared.rejectLastCacheKey() }
     }
 
     @objc func runAgent() {
         LearningAgent.shared.runManualL2()
+    }
+
+    // MARK: - Audio capture
+
+    @objc func toggleAudioCapture(_ sender: NSMenuItem) {
+        let s = AppSettings.shared
+        if s.audioCaptureEnabled {
+            // Was on → turn off.
+            AudioRecorder.shared.stop()
+            s.audioCaptureEnabled = false
+        } else {
+            // Need a folder before we can start. Prompt if missing.
+            if s.audioCaptureFolderPath.isEmpty {
+                chooseAudioFolder()
+                if s.audioCaptureFolderPath.isEmpty {
+                    statusItem.menu = buildMenu()
+                    return
+                }
+            }
+            let url = URL(fileURLWithPath: s.audioCaptureFolderPath)
+            do {
+                try AudioRecorder.shared.start(folder: url)
+                s.audioCaptureEnabled = true
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Could not start audio recording"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+                s.audioCaptureEnabled = false
+            }
+        }
+        statusItem.menu = buildMenu()
+    }
+
+    @objc func chooseAudioFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        panel.message = "Select a folder for rolling audio files"
+        if let existing = AppSettings.shared.audioCaptureFolderPath as String?,
+           !existing.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: existing)
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        AppSettings.shared.audioCaptureFolderPath = url.path
+        // If recording was already on, restart with new folder.
+        if AppSettings.shared.audioCaptureEnabled {
+            AudioRecorder.shared.stop()
+            do {
+                try AudioRecorder.shared.start(folder: url)
+            } catch {
+                AppSettings.shared.audioCaptureEnabled = false
+            }
+        }
+        statusItem.menu = buildMenu()
     }
 }

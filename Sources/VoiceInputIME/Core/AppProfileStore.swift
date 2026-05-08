@@ -4,20 +4,24 @@ import os.log
 private let profileLog = Logger(subsystem: "com.voiceinput.app", category: "AppProfile")
 
 /// Per-app behavior override: send key, whether to auto-send, delay.
-struct AppProfile: Codable, Equatable {
+struct AppProfile: Codable, Equatable, Identifiable {
+    var id: String { bundleID }
     let bundleID: String
     var displayName: String
     var sendKey: SendKeyType
     var autoSend: Bool
     /// nil = use global setting
     var autoSendDelay: TimeInterval?
+    /// nil = use global LLM model
+    var llmModelOverride: String?
 
-    init(bundleID: String, displayName: String, sendKey: SendKeyType = .enter, autoSend: Bool = true, autoSendDelay: TimeInterval? = nil) {
+    init(bundleID: String, displayName: String, sendKey: SendKeyType = .enter, autoSend: Bool = true, autoSendDelay: TimeInterval? = nil, llmModelOverride: String? = nil) {
         self.bundleID = bundleID
         self.displayName = displayName
         self.sendKey = sendKey
         self.autoSend = autoSend
         self.autoSendDelay = autoSendDelay
+        self.llmModelOverride = llmModelOverride
     }
 
     /// Effective delay (profile overrides global).

@@ -8,16 +8,37 @@ private let appleLog = Logger(subsystem: "com.voiceinput.app", category: "AppleS
 /// Local STT engine using Apple's Speech.framework. Free, offline, no API key needed.
 final class AppleSpeechEngine: STTEngine {
     var onAudioLevel: ((Float) -> Void)?
+    var onPartialTranscript: ((String) -> Void)?
 
-    private var audioEngine: AVAudioEngine?
+    private var capture = AudioCaptureSession()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var speechRecognizer: SFSpeechRecognizer?
     private var finalText = ""
     private var isRecording = false
 
+    // Continuation + guard for the isFinal-based stop path (B1).
+    // Protected by continuationLock — never resume without holding the lock.
+    private let continuationLock = NSLock()
+    private var finalContinuation: CheckedContinuation<String, Never>?
+    private var finalEmitted = false
+
     func startRecording(language: String) throws {
         guard !isRecording else { return }
+
+        // Clear any leftover continuation from a previous (possibly cancelled) run.
+        continuationLock.lock()
+        if let stale = finalContinuation {
+            finalContinuation = nil
+            continuationLock.unlock()
+            stale.resume(returning: finalText)
+        } else {
+            continuationLock.unlock()
+        }
+        continuationLock.lock()
+        finalEmitted = false
+        finalContinuation = nil
+        continuationLock.unlock()
 
         let locale = Locale(identifier: language)
         speechRecognizer = SFSpeechRecognizer(locale: locale)
@@ -25,9 +46,6 @@ final class AppleSpeechEngine: STTEngine {
         guard let recognizer = speechRecognizer, recognizer.isAvailable else {
             throw STTError.noInputDevice
         }
-
-        let engine = AVAudioEngine()
-        audioEngine = engine
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -48,52 +66,100 @@ final class AppleSpeechEngine: STTEngine {
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self = self else { return }
             if let result = result {
-                self.finalText = result.bestTranscription.formattedString
+                let text = result.bestTranscription.formattedString
+                self.finalText = text
+                DispatchQueue.main.async { self.onPartialTranscript?(text) }
             }
-            if error != nil || (result?.isFinal ?? false) {
-                // Recognition ended
+            // Resume the continuation exactly once when Apple declares the
+            // result final (or when an error terminates recognition).
+            if result?.isFinal == true || error != nil {
+                self.continuationLock.lock()
+                guard !self.finalEmitted, let cont = self.finalContinuation else {
+                    self.continuationLock.unlock()
+                    return
+                }
+                self.finalEmitted = true
+                self.finalContinuation = nil
+                let text = self.finalText
+                self.continuationLock.unlock()
+                cont.resume(returning: text)
             }
         }
 
-        // Install audio tap
-        let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0 else { throw STTError.noInputDevice }
-
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
-            guard let self = self, self.isRecording else { return }
-            self.recognitionRequest?.append(buffer)
-            let level = self.rms(buffer)
-            DispatchQueue.main.async { self.onAudioLevel?(level) }
-        }
-
-        engine.prepare()
-        try engine.start()
+        let cfg = AudioCaptureSession.Config(
+            onBuffer: { [weak self] buffer, _ in
+                self?.recognitionRequest?.append(buffer)
+            },
+            onLevel: { [weak self] level in
+                self?.onAudioLevel?(level)
+            },
+            bufferSize: 1024
+        )
+        try capture.start(config: cfg)
         isRecording = true
     }
 
-    func stopRecording(context: String) async -> String {
-        guard isRecording else { return "" }
+    func stopRecording(context: String) async -> Result<String, STTError> {
+        guard isRecording else { return .success("") }
         isRecording = false
 
         recognitionRequest?.endAudio()
+        capture.stop()
 
-        if let engine = audioEngine {
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
+        // Race: wait for the recognizer's isFinal callback vs. a 1.5 s deadline.
+        // The continuation is set here and resumed either by the recognition
+        // callback above or by the deadline branch below — exactly once.
+        let recognized: String = await withTaskGroup(of: String?.self) { group in
+            group.addTask {
+                await withCheckedContinuation { cont in
+                    self.continuationLock.lock()
+                    if self.finalEmitted {
+                        // Already fired before we even got here.
+                        let text = self.finalText
+                        self.continuationLock.unlock()
+                        cont.resume(returning: text)
+                    } else {
+                        self.finalContinuation = cont
+                        self.continuationLock.unlock()
+                    }
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                // Deadline: manually resume the continuation if isFinal hasn't
+                // fired yet so child A doesn't hang indefinitely.
+                self.continuationLock.lock()
+                guard !self.finalEmitted, let cont = self.finalContinuation else {
+                    self.continuationLock.unlock()
+                    return nil
+                }
+                self.finalEmitted = true
+                self.finalContinuation = nil
+                let text = self.finalText
+                self.continuationLock.unlock()
+                cont.resume(returning: text)
+                return nil
+            }
+            // Take whichever child returns a non-nil value first (child A),
+            // or fall back to finalText if only the deadline branch fired.
+            var result: String? = nil
+            for await value in group {
+                if let v = value {
+                    result = v
+                    group.cancelAll()
+                    break
+                }
+            }
+            return result ?? finalText
         }
-        audioEngine = nil
-
-        // Wait briefly for final result
-        try? await Task.sleep(nanoseconds: 500_000_000)
 
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest = nil
 
-        let result = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
-        appleLog.info("result: \(result, privacy: .public)")
-        return result
+        let result = recognized.trimmingCharacters(in: .whitespacesAndNewlines)
+        appleLog.info("result: \(result, privacy: .private)")
+        return .success(result)
     }
 
     // MARK: - Permission
@@ -104,17 +170,5 @@ final class AppleSpeechEngine: STTEngine {
                 completion(status == .authorized)
             }
         }
-    }
-
-    // MARK: - Audio Level
-
-    private func rms(_ buffer: AVAudioPCMBuffer) -> Float {
-        guard let data = buffer.floatChannelData else { return 0 }
-        let n = Int(buffer.frameLength)
-        guard n > 0 else { return 0 }
-        var sum: Float = 0
-        let p = data.pointee
-        for i in 0..<n { sum += p[i] * p[i] }
-        return min(sqrt(sum / Float(n)) * 5.0, 1.0)
     }
 }

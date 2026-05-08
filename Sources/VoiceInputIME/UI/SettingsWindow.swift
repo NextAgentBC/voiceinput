@@ -10,164 +10,108 @@ final class SettingsWindowController {
     func show() {
         if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 540, height: 700),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false
         )
         w.title = "Voice Input Settings"
-        w.contentView = NSHostingView(rootView: SettingsView())
+        w.minSize = NSSize(width: 640, height: 480)
+        w.contentView = NSHostingView(rootView: SettingsRootView())
         w.center()
         w.isReleasedWhenClosed = false
-        w.level = .floating
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         self.window = w
     }
 }
 
-// MARK: - Settings View
+// MARK: - Root View
 
-struct SettingsView: View {
-    @ObservedObject private var settings = AppSettings.shared
-    @State private var testResult = ""
-    @State private var isTesting = false
+struct SettingsRootView: View {
+    var body: some View {
+        TabView {
+            GeneralTab()
+                .tabItem { Label("General", systemImage: "gearshape") }
+
+            EngineTab()
+                .tabItem { Label("Engine", systemImage: "waveform") }
+
+            PerAppTab()
+                .tabItem { Label("Per-app", systemImage: "app.badge") }
+
+            VocabTab()
+                .tabItem { Label("Vocabulary", systemImage: "text.book.closed") }
+
+            HistoryTab()
+                .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+        }
+        .frame(minWidth: 640, minHeight: 480)
+    }
+}
+
+// MARK: - Permissions Section
+
+struct PermissionsSection: View {
+    @State private var micStatus: PermissionsManager.Status = .undetermined
+    @State private var speechStatus: PermissionsManager.Status = .undetermined
+    @State private var axStatus: PermissionsManager.Status = .undetermined
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-
-                GroupBox(label: Label("Speech Engine", systemImage: "waveform")) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Picker("Engine", selection: $settings.sttEngineType) {
-                            ForEach(STTEngineType.allCases, id: \.self) { type in
-                                VStack(alignment: .leading) {
-                                    Text(type.displayName)
-                                }
-                                .tag(type)
-                            }
-                        }
-                        .pickerStyle(.radioGroup)
-
-                        Text(settings.sttEngineType.description)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(8)
+        GroupBox(label: Label("Permissions", systemImage: "lock.shield")) {
+            VStack(alignment: .leading, spacing: 8) {
+                PermissionRow(label: "Microphone", status: micStatus) {
+                    PermissionsManager.openSystemSettings(for: .microphone)
                 }
-
-                if settings.sttEngineType == .cloud {
-                    GroupBox(label: Label("Cloud API", systemImage: "cloud")) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            LabeledField("Endpoint", text: $settings.sttEndpoint, placeholder: "https://stt.example.com/v1/audio/transcriptions")
-                            LabeledSecureField("API Key", text: $settings.sttAPIKey, placeholder: "Your API key")
-
-                            HStack {
-                                Button("Test Connection") { testConnection() }
-                                    .disabled(isTesting || settings.sttEndpoint.isEmpty || settings.sttAPIKey.isEmpty)
-                                if isTesting { ProgressView().controlSize(.small) }
-                                if !testResult.isEmpty {
-                                    Text(testResult)
-                                        .font(.caption)
-                                        .foregroundColor(testResult.contains("OK") ? .green : .red)
-                                }
-                            }
-                        }
-                        .padding(8)
-                    }
+                PermissionRow(label: "Speech Recognition", status: speechStatus) {
+                    PermissionsManager.openSystemSettings(for: .speechRecognition)
                 }
-
-                if settings.sttEngineType == .whisper {
-                    GroupBox(label: Label("Local Whisper", systemImage: "desktopcomputer")) {
-                        Text("Local Whisper engine will be available in a future update. Please select Apple (Local) or Cloud API for now.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(8)
-                    }
-                }
-
-                GroupBox(label: Label("Language", systemImage: "globe")) {
-                    Picker("Recognition Language", selection: $settings.selectedLanguage) {
-                        ForEach(AppSettings.supportedLanguages, id: \.code) { lang in
-                            Text(lang.name).tag(lang.code)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .padding(8)
-                }
-
-                GroupBox(label: Label("Behavior", systemImage: "gear")) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Toggle("Auto Send after transcription", isOn: $settings.autoSend)
-                        if settings.autoSend {
-                            HStack {
-                                Text("Send Key")
-                                    .frame(width: 80, alignment: .trailing)
-                                Picker("", selection: $settings.sendKey) {
-                                    ForEach(SendKeyType.allCases, id: \.self) { key in
-                                        Text(key.displayName).tag(key)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-                                .frame(width: 200)
-                            }
-                            Text("While LLM is refining, press Esc or Cmd+. to cancel. The LLM processing time is your cancel window — no extra delay needed.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(8)
-                }
-
-                GroupBox(label: Label("LLM Refinement", systemImage: "sparkles")) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Enable LLM text refinement", isOn: $settings.llmEnabled)
-                        if settings.llmEnabled {
-                            LabeledField("API Base URL", text: $settings.llmBaseURL, placeholder: "https://api.openai.com/v1")
-                            LabeledSecureField("API Key", text: $settings.llmAPIKey, placeholder: "sk-...")
-                            LabeledField("Model", text: $settings.llmModel, placeholder: "gpt-4o-mini")
-                        }
-                    }
-                    .padding(8)
-                }
-
-                SessionLoggingSection()
-
-                LearningAgentSection()
-
-                AppProfilesSection()
-
-                GroupBox(label: Label("How to Use", systemImage: "keyboard")) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Hold **Fn** to record, release to transcribe.")
-                        Text("While the LLM is refining: **Esc** or **Cmd+.** cancels the whole thing (no paste).")
-                        Text("If a cached result was wrong: menu → **Forget Last Correction**.")
-                    }
-                    .font(.caption)
-                    .padding(8)
+                PermissionRow(label: "Accessibility", status: axStatus) {
+                    PermissionsManager.openSystemSettings(for: .accessibility)
                 }
             }
-            .padding(20)
+            .padding(8)
         }
-        .frame(width: 540, height: 700)
-    }
-
-    private func testConnection() {
-        isTesting = true; testResult = ""
-        Task {
-            let r = await testSTT()
-            await MainActor.run { testResult = r; isTesting = false }
+        .onAppear { refresh() }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)) { _ in
+            refresh()
         }
     }
 
-    private func testSTT() async -> String {
-        let base = settings.sttEndpoint.replacingOccurrences(of: "/v1/audio/transcriptions", with: "")
-        guard let url = URL(string: "\(base)/health") else { return "Invalid URL" }
-        var req = URLRequest(url: url); req.timeoutInterval = 10
-        do {
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            return code == 200 ? "OK" : "HTTP \(code)"
-        } catch { return error.localizedDescription }
+    private func refresh() {
+        micStatus    = PermissionsManager.microphoneStatus()
+        speechStatus = PermissionsManager.speechRecognitionStatus()
+        axStatus     = PermissionsManager.accessibilityStatus()
+    }
+}
+
+struct PermissionRow: View {
+    let label: String
+    let status: PermissionsManager.Status
+    let openSettings: () -> Void
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .frame(width: 160, alignment: .leading)
+            switch status {
+            case .granted:
+                Label("Granted", systemImage: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+                    .font(.caption)
+            case .denied:
+                Label("Denied", systemImage: "xmark.circle.fill")
+                    .foregroundColor(.red)
+                    .font(.caption)
+                Button("Open System Settings", action: openSettings)
+                    .font(.caption)
+                    .buttonStyle(.borderless)
+                    .foregroundColor(.accentColor)
+            case .undetermined:
+                Text("Not determined")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
     }
 }
 
@@ -220,7 +164,15 @@ struct SessionLoggingSection: View {
                         .pickerStyle(.menu)
                         .frame(width: 140)
                         Button("Purge Now") {
-                            SessionStore.shared.purgeOlderThan(days: settings.sessionRetentionDays)
+                            let days = settings.sessionRetentionDays
+                            let confirmed = ConfirmAlert.destructive(
+                                title: "Purge sessions older than \(days) days?",
+                                message: "This will permanently delete old session history. This cannot be undone.",
+                                confirmTitle: "Purge"
+                            )
+                            if confirmed {
+                                SessionStore.shared.purgeOlderThan(days: days)
+                            }
                         }
                         .disabled(settings.sessionRetentionDays == 0)
                     }
@@ -301,7 +253,7 @@ struct LearningAgentSection: View {
                     .disabled(running || !settings.isLLMConfigured)
                     if running { ProgressView().controlSize(.small) }
                     if !settings.isLLMConfigured {
-                        Text("Requires LLM configured above.")
+                        Text("Requires LLM configured in Engine tab.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -315,7 +267,7 @@ struct LearningAgentSection: View {
                     ForEach(runs, id: \.id) { run in
                         VStack(alignment: .leading, spacing: 2) {
                             HStack {
-                                Text(run.runAt.formatted(.dateTime.month().day().hour().minute()))
+                                Text(DateFormat.timeOfDay(run.runAt))
                                     .font(.caption.monospacedDigit())
                                 Text("[\(run.tier)]")
                                     .font(.caption2)
@@ -343,152 +295,5 @@ struct LearningAgentSection: View {
 
     private func reload() {
         runs = SessionStore.shared.recentAgentRuns(limit: 5)
-    }
-}
-
-// MARK: - App Profiles Section
-
-struct AppProfilesSection: View {
-    @State private var profiles: [AppProfile] = []
-    @State private var runningApps: [(bundleID: String, name: String)] = []
-    @State private var selectedAddID: String = ""
-
-    var body: some View {
-        GroupBox(label: Label("App Profiles", systemImage: "app.badge")) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Per-app send key and auto-send override. Default for unknown apps uses Behavior settings above.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                if profiles.isEmpty {
-                    Text("No profiles. Click Reset to add built-in defaults.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.vertical, 8)
-                } else {
-                    VStack(spacing: 4) {
-                        ForEach(profiles, id: \.bundleID) { profile in
-                            AppProfileRow(profile: profile, onChange: { reload() })
-                        }
-                    }
-                }
-
-                Divider()
-
-                HStack {
-                    Picker("Add running app", selection: $selectedAddID) {
-                        Text("Select running app…").tag("")
-                        ForEach(runningApps.filter { app in !profiles.contains { $0.bundleID == app.bundleID } }, id: \.bundleID) { app in
-                            Text(app.name).tag(app.bundleID)
-                        }
-                    }
-                    .pickerStyle(.menu)
-
-                    Button("Add") {
-                        addSelected()
-                    }
-                    .disabled(selectedAddID.isEmpty)
-
-                    Spacer()
-
-                    Button("Reset to Defaults") {
-                        AppProfileStore.shared.resetToDefaults()
-                        reload()
-                    }
-                }
-            }
-            .padding(8)
-        }
-        .onAppear {
-            reload()
-            loadRunningApps()
-        }
-    }
-
-    private func reload() {
-        profiles = AppProfileStore.shared.allProfiles()
-    }
-
-    private func loadRunningApps() {
-        runningApps = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular }
-            .compactMap { app -> (String, String)? in
-                guard let id = app.bundleIdentifier, let name = app.localizedName else { return nil }
-                return (id, name)
-            }
-            .sorted { $0.1.lowercased() < $1.1.lowercased() }
-    }
-
-    private func addSelected() {
-        guard !selectedAddID.isEmpty,
-              let app = runningApps.first(where: { $0.bundleID == selectedAddID }) else { return }
-        AppProfileStore.shared.upsert(AppProfile(
-            bundleID: app.bundleID,
-            displayName: app.name,
-            sendKey: AppSettings.shared.sendKey,
-            autoSend: AppSettings.shared.autoSend
-        ))
-        selectedAddID = ""
-        reload()
-    }
-}
-
-struct AppProfileRow: View {
-    let profile: AppProfile
-    let onChange: () -> Void
-
-    @State private var sendKey: SendKeyType
-    @State private var autoSend: Bool
-
-    init(profile: AppProfile, onChange: @escaping () -> Void) {
-        self.profile = profile
-        self.onChange = onChange
-        _sendKey = State(initialValue: profile.sendKey)
-        _autoSend = State(initialValue: profile.autoSend)
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(profile.displayName)
-                .frame(width: 140, alignment: .leading)
-                .lineLimit(1)
-                .truncationMode(.tail)
-
-            Picker("", selection: $sendKey) {
-                ForEach(SendKeyType.allCases, id: \.self) { key in
-                    Text(key.displayName).tag(key)
-                }
-            }
-            .pickerStyle(.menu)
-            .frame(width: 110)
-            .onChange(of: sendKey) { _, newValue in
-                save(sendKey: newValue, autoSend: autoSend)
-            }
-
-            Toggle("Auto", isOn: $autoSend)
-                .toggleStyle(.checkbox)
-                .onChange(of: autoSend) { _, newValue in
-                    save(sendKey: sendKey, autoSend: newValue)
-                }
-
-            Spacer()
-
-            Button(action: {
-                AppProfileStore.shared.remove(bundleID: profile.bundleID)
-                onChange()
-            }) {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-            .foregroundColor(.secondary)
-        }
-        .font(.caption)
-    }
-
-    private func save(sendKey: SendKeyType, autoSend: Bool) {
-        var updated = profile
-        updated.sendKey = sendKey
-        updated.autoSend = autoSend
-        AppProfileStore.shared.upsert(updated)
     }
 }

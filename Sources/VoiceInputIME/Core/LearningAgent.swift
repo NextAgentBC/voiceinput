@@ -124,14 +124,16 @@ final class LearningAgent {
         }
 
         if let vocab = json["user_vocabulary"] as? [[String: Any]] {
+            var batch: [(original: String, corrected: String, source: String, confidence: Double)] = []
             for v in vocab {
                 guard let term = v["term"] as? String, !term.isEmpty else { continue }
                 let aliases = (v["aliases"] as? [String]) ?? []
                 for alias in aliases where alias != term {
-                    VocabularyDB.shared.learn(original: alias, corrected: term, source: "agent_l2", confidence: 0.8)
+                    batch.append((original: alias, corrected: term, source: "agent_l2", confidence: 0.8))
                     vocabAdded += 1
                 }
             }
+            VocabularyDB.shared.learnBatch(batch)
         }
 
         let summary = (json["summary"] as? String) ?? "Added \(correctionsAdded) corrections, \(vocabAdded) vocab"

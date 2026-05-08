@@ -1,6 +1,6 @@
 import Foundation
 
-enum RecognitionState {
+enum RecognitionState: Equatable {
     case idle
     case recording
     case refining

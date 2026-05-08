@@ -18,6 +18,7 @@ targets:
         excludes:
           - Info.plist
           - rime
+          - AppIcon.iconset
         buildPhase: resources
 
     postBuildScripts:

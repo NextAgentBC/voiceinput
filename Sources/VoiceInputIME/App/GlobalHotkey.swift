@@ -88,14 +88,33 @@ final class GlobalHotkey {
             if action == .consume { return nil }
         }
 
+        let rec = RecordingSession.shared
+        let pre = PreSendController.shared
+
+        // Cmd+C while the floating panel has a visible transcript: copy our
+        // partial / final text to the pasteboard instead of the foreground
+        // app's selection. The user is offered this via a "⌘C to copy" hint.
+        if type == .keyDown {
+            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            let flags = event.flags
+            let isCmdC = keyCode == 8
+                && flags.contains(.maskCommand)
+                && !flags.contains(.maskShift)
+                && !flags.contains(.maskAlternate)
+                && !flags.contains(.maskControl)
+            if isCmdC, rec.copyableTranscriptNonisolated != nil {
+                DispatchQueue.main.async { rec.copyVisibleTranscript() }
+                return nil  // consume so the foreground app doesn't also copy.
+            }
+        }
+
         // Any non-synthetic input event during the "paste → send" window
         // means the user is editing. Cancel LLM overwrite + auto-send,
         // preserve the pasted text, and we'll learn from their final version
         // when they eventually press Enter.
-        let rec = RecordingSession.shared
-        let pre = PreSendController.shared
-        let inEditWindow = (rec.isRefining || pre.isPending)
-            && !rec.isInjecting
+        // Use nonisolated atomic readers — this callback runs off the main thread.
+        let inEditWindow = (rec.isRefiningNonisolated || pre.isPending)
+            && !rec.isInjectingNonisolated
             && !pre.isFiringOwnEnter
 
         if type == .keyDown && inEditWindow {
@@ -128,7 +147,7 @@ final class GlobalHotkey {
         if type == .keyDown
             && !pre.isPending
             && !pre.isFiringOwnEnter
-            && !rec.isInjecting {
+            && !rec.isInjectingNonisolated {
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
             if keyCode == 0x24 {
                 let captured = FocusedTextReader.read()
@@ -139,23 +158,33 @@ final class GlobalHotkey {
             }
         }
 
-        // Fn press/release ONLY comes from flagsChanged events on keyCode 63.
+        // Hotkey: Fn+Ctrl held together. Using a combo (rather than Fn alone)
+        // avoids accidental triggers when the user taps Fn during normal
+        // typing or via the globe-key shortcut. Both keys must be held; a
+        // release of EITHER ends the recording. Fn key = keyCode 63,
+        // Control = 59 (left) / 62 (right). flagsChanged fires once per
+        // modifier transition, so we read the combined flag state from the
+        // event itself rather than tracking each key separately.
         // Arrow keys (123-126) emit keyDown with .maskSecondaryFn set too,
-        // so we must not read the flag on non-flagsChanged events.
+        // so we must not read these flags on non-flagsChanged events.
         if type == .flagsChanged {
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-            guard keyCode == 63 else { return Unmanaged.passRetained(event) }
+            // Only consider transitions for the keys involved in our combo.
+            guard keyCode == 63 || keyCode == 59 || keyCode == 62 else {
+                return Unmanaged.passRetained(event)
+            }
 
-            let fnDown = event.flags.contains(.maskSecondaryFn)
+            let bothDown = event.flags.contains(.maskSecondaryFn)
+                        && event.flags.contains(.maskControl)
 
-            if fnDown && !fnPressed {
+            if bothDown && !fnPressed {
                 fnPressed = true
                 DispatchQueue.main.async { [weak self] in
                     self?.onHotkeyDown?()
                     self?.startSafetyTimer()
                 }
                 return nil
-            } else if !fnDown && fnPressed {
+            } else if !bothDown && fnPressed {
                 fnPressed = false
                 DispatchQueue.main.async { [weak self] in
                     self?.stopSafetyTimer()

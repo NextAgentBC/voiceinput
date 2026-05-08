@@ -87,8 +87,17 @@ struct SessionsRootView: View {
                             .tag(session.id)
                             .contextMenu {
                                 Button("Delete", role: .destructive) {
-                                    SessionStore.shared.deleteSession(session.id)
-                                    reload()
+                                    let appName = session.appDisplayName ?? "Unknown app"
+                                    let entryCount = session.entryCount
+                                    let confirmed = ConfirmAlert.destructive(
+                                        title: "Delete this session?",
+                                        message: "\(appName) — \(entryCount) \(entryCount == 1 ? "entry" : "entries"). This cannot be undone.",
+                                        confirmTitle: "Delete"
+                                    )
+                                    if confirmed {
+                                        SessionStore.shared.deleteSession(session.id)
+                                        reload()
+                                    }
                                 }
                             }
                     }
@@ -110,7 +119,7 @@ struct SessionsRootView: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                         Spacer()
-                        Text(item.entry.timestamp.formatted(.dateTime.month().day().hour().minute()))
+                        Text(DateFormat.timeOfDay(item.entry.timestamp))
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
@@ -154,11 +163,7 @@ struct SessionsRootView: View {
     }
 
     private func dateLabel(for date: Date, cal: Calendar) -> String {
-        if cal.isDateInToday(date) { return "Today" }
-        if cal.isDateInYesterday(date) { return "Yesterday" }
-        let days = cal.dateComponents([.day], from: date, to: Date()).day ?? 0
-        if days < 7 { return date.formatted(.dateTime.weekday(.wide)) }
-        return date.formatted(.dateTime.month().day())
+        DateFormat.relativeShort(date)
     }
 }
 
@@ -186,7 +191,7 @@ struct SessionRow: View {
                     .foregroundColor(.secondary)
                     .lineLimit(2)
             }
-            Text(session.startedAt.formatted(.dateTime.hour().minute()))
+            Text(DateFormat.timeOfDay(session.startedAt))
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }
@@ -245,7 +250,7 @@ struct SessionDetailView: View {
                     }
                 }
                 HStack(spacing: 16) {
-                    Label(session.startedAt.formatted(.dateTime), systemImage: "clock")
+                    Label(DateFormat.headerLong(session.startedAt), systemImage: "clock")
                     Label("\(entries.count) entries", systemImage: "text.bubble")
                     if let bundle = session.appBundleID {
                         Text(bundle).font(.caption2)
@@ -287,10 +292,10 @@ struct SessionDetailView: View {
         panel.nameFieldStringValue = "session-\(session.startedAt.formatted(.iso8601)).md"
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        var md = "# \(session.appDisplayName ?? "Session") — \(session.startedAt.formatted(.dateTime))\n\n"
+        var md = "# \(session.appDisplayName ?? "Session") — \(DateFormat.headerLong(session.startedAt))\n\n"
         if let summary = session.summary { md += "> \(summary)\n\n" }
         for e in entries {
-            md += "- **\(e.timestamp.formatted(.dateTime.hour().minute()))** \(e.finalText)\n"
+            md += "- **\(DateFormat.timeOfDay(e.timestamp))** \(e.finalText)\n"
             if e.rawText != e.finalText {
                 md += "  - _raw:_ \(e.rawText)\n"
             }
@@ -334,7 +339,7 @@ struct EntryGroupRow: View {
                     }
                 }
             }
-            Text(group.firstTimestamp.formatted(.dateTime.hour().minute().second()))
+            Text(DateFormat.timeOfDay(group.firstTimestamp, includeSeconds: true))
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }
