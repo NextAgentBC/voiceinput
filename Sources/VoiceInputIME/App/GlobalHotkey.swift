@@ -169,6 +169,10 @@ final class GlobalHotkey {
         // so we must not read these flags on non-flagsChanged events.
         if type == .flagsChanged {
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            // Diagnostic: log every modifier-key transition so we can see
+            // what flag bits the user's keyboard actually sets when they
+            // press Option / Fn / Ctrl. Helps debug false triggers.
+            hotkeyLog.info("flagsChanged kc=\(keyCode, privacy: .public) flags=0x\(String(format: "%llx", event.flags.rawValue), privacy: .public)")
             // Only consider transitions for the keys involved in our combo.
             guard keyCode == 63 || keyCode == 59 || keyCode == 62 else {
                 return Unmanaged.passRetained(event)

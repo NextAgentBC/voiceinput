@@ -58,7 +58,7 @@ make open
 In Xcode:
 
 1. Select both targets → **Signing & Capabilities** → pick your team.
-2. Create an App Group `group.com.voiceinput.shared` in the Apple Developer portal and add it to both targets (already referenced in the entitlements files).
+2. Create an App Group `group.ca.nextagent.voiceinput.shared` in the Apple Developer portal and add it to both targets (already referenced in the entitlements files).
 3. Build & Run the `VoiceInputiOS` scheme on a real device (the simulator cannot grant keyboard Full Access in a realistic way).
 
 ## Trying on iPhone (TestFlight)

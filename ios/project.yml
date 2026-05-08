@@ -16,7 +16,7 @@ settings:
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     # Shared app group for Settings exchange between container and keyboard.
     # Replace with your own group id after creating it in the Developer portal.
-    APP_GROUP_ID: group.com.voiceinput.shared
+    APP_GROUP_ID: group.ca.nextagent.voiceinput.shared
 
 targets:
   VoiceInputiOS:

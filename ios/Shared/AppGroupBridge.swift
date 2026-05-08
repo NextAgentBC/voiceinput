@@ -14,7 +14,7 @@ import os
 /// No UIKit / AppKit symbols are referenced.
 public enum AppGroupBridge {
 
-    public static let groupID = "group.com.voiceinput.shared"
+    public static let groupID = "group.ca.nextagent.voiceinput.shared"
 
     // MARK: - Data types
 
