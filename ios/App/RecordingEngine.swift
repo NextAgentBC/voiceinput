@@ -109,6 +109,14 @@ final class RecordingEngine: @unchecked Sendable {
     // MARK: - Core recognition
 
     private func startRecognition(requestID: UUID, language: String) async throws {
+        // Permission gate — request both before touching AVAudioSession /
+        // SFSpeechRecognizer. Otherwise the engine silently stalls (or fails
+        // with a confusing "session inactive" error) when user never granted.
+        let speechAuth = await Self.ensureSpeechAuthorization()
+        guard speechAuth else { throw RecordingError.speechPermissionDenied }
+        let micGranted = await Self.ensureMicrophonePermission()
+        guard micGranted else { throw RecordingError.microphonePermissionDenied }
+
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .measurement, options: .duckOthers)
         try session.setActive(true, options: .notifyOthersOnDeactivation)
@@ -263,6 +271,48 @@ final class RecordingEngine: @unchecked Sendable {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
+    private static func ensureSpeechAuthorization() async -> Bool {
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized: return true
+        case .denied, .restricted: return false
+        case .notDetermined:
+            return await withCheckedContinuation { cont in
+                SFSpeechRecognizer.requestAuthorization { status in
+                    cont.resume(returning: status == .authorized)
+                }
+            }
+        @unknown default: return false
+        }
+    }
+
+    private static func ensureMicrophonePermission() async -> Bool {
+        if #available(iOS 17, *) {
+            switch AVAudioApplication.shared.recordPermission {
+            case .granted: return true
+            case .denied: return false
+            case .undetermined:
+                return await withCheckedContinuation { cont in
+                    AVAudioApplication.requestRecordPermission { granted in
+                        cont.resume(returning: granted)
+                    }
+                }
+            @unknown default: return false
+            }
+        } else {
+            switch AVAudioSession.sharedInstance().recordPermission {
+            case .granted: return true
+            case .denied: return false
+            case .undetermined:
+                return await withCheckedContinuation { cont in
+                    AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                        cont.resume(returning: granted)
+                    }
+                }
+            @unknown default: return false
+            }
+        }
+    }
+
     private static func rmsLevel(buffer: AVAudioPCMBuffer) -> Float {
         guard let channelData = buffer.floatChannelData else { return 0 }
         let channelCount = Int(buffer.format.channelCount)
@@ -285,11 +335,17 @@ final class RecordingEngine: @unchecked Sendable {
 
 enum RecordingError: LocalizedError {
     case recognizerUnavailable
+    case speechPermissionDenied
+    case microphonePermissionDenied
 
     var errorDescription: String? {
         switch self {
         case .recognizerUnavailable:
             return "Speech recognizer unavailable for the selected language."
+        case .speechPermissionDenied:
+            return "Speech recognition permission denied. Enable in Settings."
+        case .microphonePermissionDenied:
+            return "Microphone permission denied. Enable in Settings."
         }
     }
 }

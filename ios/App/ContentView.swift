@@ -7,10 +7,7 @@ struct ContentView: View {
 
     @State private var micStatus: AVAudioSession.RecordPermission = .undetermined
     @State private var speechStatus: SFSpeechRecognizerAuthorizationStatus = .notDetermined
-    @State private var showingRecording = false
-    @State private var testRequestID: UUID = UUID()
     @State private var testLanguage = "zh-CN"
-    @State private var showMalformedAlert = false
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
@@ -42,14 +39,6 @@ struct ContentView: View {
             if phase == .active { refreshPermissions() }
         }
         .onAppear(perform: refreshPermissions)
-        .fullScreenCover(isPresented: $showingRecording) {
-            RecordingView(requestID: testRequestID, language: testLanguage)
-        }
-        .alert("Invalid recording request", isPresented: $showMalformedAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("The URL could not be parsed as a valid recording request.")
-        }
     }
 
     // MARK: - Sections
@@ -201,18 +190,13 @@ struct ContentView: View {
         UIApplication.shared.open(url)
     }
 
+    /// Trigger the SAME URL-handler path that the keyboard extension uses.
+    /// Eliminates the duplicate-fullScreenCover bug that caused stuck Test
+    /// Recording: only VoiceInputApp owns the modal presentation now.
     private func launchTestRecording() {
-        testRequestID = UUID()
-        AppGroupBridge.clearResult()
-        let req = AppGroupBridge.RecordRequest(
-            id: testRequestID,
-            createdAt: Date(),
-            language: testLanguage,
-            hostBundleID: nil
-        )
-        AppGroupBridge.writeRequest(req)
-        AppGroupBridge.post(AppGroupBridge.didStartRequestNotification)
-        showingRecording = true
+        let id = UUID()
+        guard let url = URL(string: "voiceinput://record?lang=\(testLanguage)&id=\(id.uuidString)") else { return }
+        UIApplication.shared.open(url)
     }
 
     // MARK: - Helpers
