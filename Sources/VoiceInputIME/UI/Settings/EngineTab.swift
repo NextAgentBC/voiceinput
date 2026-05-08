@@ -33,11 +33,17 @@ struct EngineTab: View {
                     GroupBox(label: Label("Cloud API", systemImage: "cloud")) {
                         VStack(alignment: .leading, spacing: 10) {
                             LabeledField("Endpoint", text: $settings.sttEndpoint, placeholder: "https://stt.example.com/v1/audio/transcriptions")
-                            LabeledSecureField("API Key", text: $settings.sttAPIKey, placeholder: "Your API key")
+                            LabeledSecureField("API Key", text: $settings.sttAPIKey, placeholder: "Optional — leave empty if endpoint injects auth")
+                            LabeledField("Model", text: $settings.sttModel, placeholder: "Optional — e.g. Qwen/Qwen3-ASR-1.7B or whisper-1")
+
+                            HStack {
+                                Button("Use credbroker (Qwen3-ASR)") { useCredbrokerPreset() }
+                                    .help("Set endpoint to the local credbroker Qwen3-ASR proxy. Requires Tailscale connection to mainserver.")
+                            }
 
                             HStack {
                                 Button("Test Connection") { testSTTConnection() }
-                                    .disabled(sttIsTesting || settings.sttEndpoint.isEmpty || settings.sttAPIKey.isEmpty)
+                                    .disabled(sttIsTesting || settings.sttEndpoint.isEmpty)
                                 if sttIsTesting { ProgressView().controlSize(.small) }
                                 if !sttTestResult.isEmpty {
                                     Text(sttTestResult)
@@ -77,8 +83,11 @@ struct EngineTab: View {
                         Toggle("Enable LLM text refinement", isOn: $settings.llmEnabled)
                         if settings.llmEnabled {
                             LabeledField("API Base URL", text: $settings.llmBaseURL, placeholder: "https://api.openai.com/v1")
-                            LabeledSecureField("API Key", text: $settings.llmAPIKey, placeholder: "sk-...")
+                            LabeledSecureField("API Key", text: $settings.llmAPIKey, placeholder: "Optional")
                             LabeledField("Model", text: $settings.llmModel, placeholder: "gpt-4o-mini")
+
+                            Toggle("Polish mode (auto-paragraph + bullet lists)", isOn: $settings.llmPolishMode)
+                                .help("On: LLM restructures long dictation. Off: LLM only fixes obvious STT errors.")
 
                             HStack {
                                 Button("Test Connection") { testLLMConnection() }
@@ -103,6 +112,15 @@ struct EngineTab: View {
                 lastSTTErrorDate = Date()
             }
         }
+    }
+
+    private func useCredbrokerPreset() {
+        settings.sttEngineType = .cloud
+        settings.sttEndpoint = "http://100.79.97.110:8800/v1/proxy/asr/v1/audio/transcriptions"
+        settings.sttModel = "Qwen/Qwen3-ASR-1.7B"
+        // Broker auth is automatic via Tailscale identity — no client key.
+        settings.sttAPIKey = ""
+        sttTestResult = "Configured. Test to verify."
     }
 
     private func testSTTConnection() {
@@ -137,7 +155,9 @@ struct EngineTab: View {
         guard let url = URL(string: "\(base)/models") else { return "Invalid URL" }
         var req = URLRequest(url: url)
         req.timeoutInterval = 10
-        req.setValue("Bearer \(settings.llmAPIKey)", forHTTPHeaderField: "Authorization")
+        if !settings.llmAPIKey.isEmpty {
+            req.setValue("Bearer \(settings.llmAPIKey)", forHTTPHeaderField: "Authorization")
+        }
         do {
             let (_, resp) = try await URLSession.shared.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0

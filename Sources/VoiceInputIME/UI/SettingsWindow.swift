@@ -31,19 +31,13 @@ struct SettingsRootView: View {
     var body: some View {
         TabView {
             GeneralTab()
-                .tabItem { Label("General", systemImage: "gearshape") }
+                .tabItem { Label("Setup", systemImage: "gearshape") }
 
             EngineTab()
-                .tabItem { Label("Engine", systemImage: "waveform") }
+                .tabItem { Label("AI", systemImage: "waveform") }
 
-            PerAppTab()
-                .tabItem { Label("Per-app", systemImage: "app.badge") }
-
-            VocabTab()
-                .tabItem { Label("Vocabulary", systemImage: "text.book.closed") }
-
-            HistoryTab()
-                .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+            ToolsTab()
+                .tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }
         }
         .frame(minWidth: 640, minHeight: 480)
     }

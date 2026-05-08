@@ -49,7 +49,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let s = AppSettings.shared
         if s.audioCaptureEnabled, !s.audioCaptureFolderPath.isEmpty {
             do {
-                try AudioRecorder.shared.start(folder: URL(fileURLWithPath: s.audioCaptureFolderPath))
+                try MeetingTranscriber.shared.start(folder: URL(fileURLWithPath: s.audioCaptureFolderPath))
             } catch {
                 logger.error("Audio capture auto-start failed: \(error.localizedDescription, privacy: .public)")
                 s.audioCaptureEnabled = false
@@ -240,20 +240,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        // Audio capture (continuous background recording, 1-min rotation).
-        let audioItem = NSMenuItem(title: "Record Audio to File", action: #selector(toggleAudioCapture(_:)), keyEquivalent: "")
+        // Meeting Notes — continuous background transcription appended to one
+        // Markdown file per session (started fresh on each enable).
+        let audioItem = NSMenuItem(title: "Meeting Notes (auto-transcribe)", action: #selector(toggleAudioCapture(_:)), keyEquivalent: "")
         audioItem.target = self
         audioItem.state = settings.audioCaptureEnabled ? .on : .off
+        audioItem.toolTip = "When enabled, continuously transcribes audio and appends to a single .md file per session."
         menu.addItem(audioItem)
 
         let folderTitle: String = {
             let path = settings.audioCaptureFolderPath
-            if path.isEmpty { return "Audio Folder: (not set)" }
-            return "Audio Folder: \((path as NSString).abbreviatingWithTildeInPath)"
+            if path.isEmpty { return "Notes Folder: (not set)" }
+            return "Notes Folder: \((path as NSString).abbreviatingWithTildeInPath)"
         }()
         let folderItem = NSMenuItem(title: folderTitle, action: #selector(chooseAudioFolder), keyEquivalent: "")
         folderItem.target = self
-        folderItem.toolTip = "Click to choose where rolling audio files (one per minute) are saved."
+        folderItem.toolTip = "Click to choose where meeting-notes Markdown files are saved."
         menu.addItem(folderItem)
 
         menu.addItem(.separator())
@@ -325,7 +327,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let s = AppSettings.shared
         if s.audioCaptureEnabled {
             // Was on → turn off.
-            AudioRecorder.shared.stop()
+            MeetingTranscriber.shared.stop()
             s.audioCaptureEnabled = false
         } else {
             // Need a folder before we can start. Prompt if missing.
@@ -338,7 +340,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             let url = URL(fileURLWithPath: s.audioCaptureFolderPath)
             do {
-                try AudioRecorder.shared.start(folder: url)
+                try MeetingTranscriber.shared.start(folder: url)
                 s.audioCaptureEnabled = true
             } catch {
                 let alert = NSAlert()
@@ -369,9 +371,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         AppSettings.shared.audioCaptureFolderPath = url.path
         // If recording was already on, restart with new folder.
         if AppSettings.shared.audioCaptureEnabled {
-            AudioRecorder.shared.stop()
+            MeetingTranscriber.shared.stop()
             do {
-                try AudioRecorder.shared.start(folder: url)
+                try MeetingTranscriber.shared.start(folder: url)
             } catch {
                 AppSettings.shared.audioCaptureEnabled = false
             }

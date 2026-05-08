@@ -174,8 +174,16 @@ final class GlobalHotkey {
                 return Unmanaged.passRetained(event)
             }
 
+            // Strict: ONLY Fn+Ctrl. Any extra modifier (Option, Shift, Cmd)
+            // means the user is doing some other shortcut — don't toggle
+            // recording. Loose match (just `contains(.maskSecondaryFn) &&
+            // contains(.maskControl)`) caused false triggers when Option
+            // got added on top of Fn+Ctrl.
             let bothDown = event.flags.contains(.maskSecondaryFn)
                         && event.flags.contains(.maskControl)
+                        && !event.flags.contains(.maskAlternate)
+                        && !event.flags.contains(.maskShift)
+                        && !event.flags.contains(.maskCommand)
 
             if bothDown && !fnPressed {
                 fnPressed = true

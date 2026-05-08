@@ -19,6 +19,11 @@ private struct VoiceInputSettings: Codable {
     var sessionBlacklist: [String] = AppSettings.defaultSessionBlacklist
     var audioCaptureEnabled: Bool = false
     var audioCaptureFolderPath: String = ""
+    /// Model identifier sent in the `model` multipart field for Cloud STT.
+    /// Required by some self-hosted endpoints (Qwen3-ASR via credbroker, etc.).
+    /// Empty string = don't send the field.
+    var sttModel: String = ""
+    var llmPolishMode: Bool = false
 }
 
 // MARK: - AppSettings
@@ -107,6 +112,22 @@ final class AppSettings: NSObject, ObservableObject {
         didSet { mutate { $0.audioCaptureFolderPath = audioCaptureFolderPath } }
     }
 
+    /// Identifier sent in the multipart `model` field of Cloud STT requests
+    /// (and the meeting-notes transcriber). Self-hosted Qwen3-ASR via
+    /// credbroker requires `Qwen/Qwen3-ASR-1.7B`; OpenAI Whisper accepts
+    /// `whisper-1`. Empty = don't send the field.
+    @Published var sttModel: String {
+        didSet { mutate { $0.sttModel = sttModel } }
+    }
+
+    /// When true, the LLM refiner is allowed to restructure transcribed
+    /// text — paragraph breaks, bullet lists, light prose editing.
+    /// When false (default) it stays in conservative mode: only fix obvious
+    /// STT errors, never rewrite.
+    @Published var llmPolishMode: Bool {
+        didSet { mutate { $0.llmPolishMode = llmPolishMode } }
+    }
+
     static let defaultSessionBlacklist = [
         "com.agilebits.onepassword7",
         "com.agilebits.onepassword",
@@ -126,13 +147,16 @@ final class AppSettings: NSObject, ObservableObject {
     var isSTTConfigured: Bool {
         switch sttEngineType {
         case .apple: return true
-        case .cloud: return !sttEndpoint.isEmpty && !sttAPIKey.isEmpty
+        // API key is optional — credbroker / private endpoints inject auth
+        // server-side, so we only require the endpoint URL.
+        case .cloud: return !sttEndpoint.isEmpty
         case .whisper: return false
         }
     }
 
     var isLLMConfigured: Bool {
-        llmEnabled && !llmBaseURL.isEmpty && !llmAPIKey.isEmpty
+        // API key optional — credbroker / private endpoints inject auth.
+        llmEnabled && !llmBaseURL.isEmpty
     }
 
     // MARK: - Storage
@@ -206,6 +230,8 @@ final class AppSettings: NSObject, ObservableObject {
         self.sessionBlacklist = settings.sessionBlacklist
         self.audioCaptureEnabled = settings.audioCaptureEnabled
         self.audioCaptureFolderPath = settings.audioCaptureFolderPath
+        self.sttModel = settings.sttModel
+        self.llmPolishMode = settings.llmPolishMode
 
         super.init()
 

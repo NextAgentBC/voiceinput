@@ -383,7 +383,14 @@ final class RecordingSession {
         let shouldAutoSend = profile?.autoSend ?? settings.autoSend
         guard shouldAutoSend else {
             recLog.info("Auto-send skipped (app=\(bundleID ?? "unknown", privacy: .public))")
-            restoreClipboardIfNeeded()
+            // CGEvent Cmd+V is posted asynchronously — the target app hasn't
+            // read the pasteboard yet at this point. If we restore the saved
+            // clipboard synchronously the user sees their OLD clipboard land
+            // in the field instead of the dictation. Delay the restore so
+            // Cmd+V has a chance to be processed first.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.restoreClipboardIfNeeded()
+            }
             return
         }
 

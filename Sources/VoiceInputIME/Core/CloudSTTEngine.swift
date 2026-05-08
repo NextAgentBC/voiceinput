@@ -143,8 +143,8 @@ final class CloudSTTEngine: STTEngine {
 
     private func transcribe(_ audioData: Data, context: String) async -> Result<String, STTError> {
         let settings = AppSettings.shared
-        guard !settings.sttEndpoint.isEmpty, !settings.sttAPIKey.isEmpty else {
-            cloudLog.error("No endpoint or API key configured")
+        guard !settings.sttEndpoint.isEmpty else {
+            cloudLog.error("No endpoint configured")
             return .failure(.notConfigured)
         }
 
@@ -156,6 +156,10 @@ final class CloudSTTEngine: STTEngine {
         append("Content-Disposition: form-data; name=\"language\"\r\n\r\n\(recordingLanguage)\r\n")
         append("--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"temperature\"\r\n\r\n0\r\n")
+        if !settings.sttModel.isEmpty {
+            append("--\(boundary)\r\n")
+            append("Content-Disposition: form-data; name=\"model\"\r\n\r\n\(settings.sttModel)\r\n")
+        }
         if !context.isEmpty {
             append("--\(boundary)\r\n")
             append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n\(String(context.suffix(300)))\r\n")
@@ -171,7 +175,10 @@ final class CloudSTTEngine: STTEngine {
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.setValue("Bearer \(settings.sttAPIKey)", forHTTPHeaderField: "Authorization")
+        // API key optional — broker/private endpoints inject auth server-side.
+        if !settings.sttAPIKey.isEmpty {
+            req.setValue("Bearer \(settings.sttAPIKey)", forHTTPHeaderField: "Authorization")
+        }
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 20
         req.httpBody = body
