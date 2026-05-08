@@ -33,7 +33,7 @@
             <key>PrefersRightToLeft</key>
             <false/>
             <key>PrimaryLanguage</key>
-            <string>en-US</string>
+            <string>zh-Hans</string>
             <!-- Required for network (Cloud STT) and Speech framework access. -->
             <key>RequestsOpenAccess</key>
             <true/>

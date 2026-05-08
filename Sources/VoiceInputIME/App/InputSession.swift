@@ -564,12 +564,16 @@ final class RecordingSession {
             }
         }
 
-        let pb = NSPasteboard.general
-        if preserveClipboard && !clipboardWasSaved {
-            savedClipboard = pb.string(forType: .string)
-            clipboardWasSaved = true
-        }
+        // Clipboard preservation removed: previously we saved the user's
+        // existing clipboard, wrote our dictation, posted Cmd+V, then later
+        // restored the saved value. That clobbered any text the user copied
+        // (Cmd+C) in the interval between paste and restore — breaking
+        // normal copy-paste in unrelated apps. The dictated text simply
+        // stays on the clipboard now; user can re-paste it if they want.
+        // `preserveClipboard` parameter is ignored.
+        _ = preserveClipboard
 
+        let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(text, forType: .string)
 
@@ -617,14 +621,10 @@ final class RecordingSession {
         utterance.pastedText = newText
     }
 
+    /// No-op now — preserve-clipboard feature dropped. Kept as a stub so the
+    /// existing call sites compile unchanged. Removable in a follow-up cleanup.
     private func restoreClipboardIfNeeded() {
-        guard clipboardWasSaved else { return }
-        let pb = NSPasteboard.general
-        let saved = savedClipboard
-        clipboardWasSaved = false
-        savedClipboard = nil
-        pb.clearContents()
-        if let s = saved { pb.setString(s, forType: .string) }
+        // Intentionally empty.
     }
 
     // MARK: - CJK Helpers

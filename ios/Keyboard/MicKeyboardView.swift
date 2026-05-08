@@ -1,178 +1,199 @@
 import SwiftUI
-import UIKit
-import AVFoundation
 
-/// SwiftUI view presented inside the keyboard extension.
-///
-/// Layout: one WeChat-style "hold to talk" bar filling the width, small globe key on the
-/// left for switching keyboards. No space/return/delete — this keyboard is pure dictation.
+@MainActor
+final class KeyboardLiveStatusModel: ObservableObject {
+    @Published var phase: AppGroupBridge.LiveStatus.Phase = .starting
+    @Published var partialText: String = ""
+    @Published var audioLevel: Float = 0
+    @Published var errorMessage: String? = nil
+    /// Set by the VC on each viewWillAppear; gates the mic button.
+    @Published var hasFullAccess: Bool = true
+}
+
 struct MicKeyboardView: View {
-    let hasFullAccess: Bool
-    let onInsert: (String) -> Void
-    let onDeleteBackward: () -> Void        // kept for API compat; unused in bar mode
-    let onSpace: () -> Void                 // kept for API compat; unused in bar mode
-    let onReturn: () -> Void                // kept for API compat; unused in bar mode
-    let onNextKeyboard: () -> Void
-
-    @StateObject private var recorder = KeyboardRecorder()
+    @ObservedObject var model: KeyboardLiveStatusModel
+    let onTap: () -> Void
+    let onSwitch: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            PressAndHoldBar(
-                isRecording: recorder.state == .recording,
-                label: barLabel,
-                onPress: { recorder.startIfNeeded() },
-                onRelease: {
-                    recorder.stopAndTranscribe { text in
-                        guard !text.isEmpty else { return }
-                        let out = SharedSettings.autoInsertSpace ? text + " " : text
-                        onInsert(out)
-                    }
-                }
-            )
+        VStack(spacing: 0) {
+            partialBar
+
+            Spacer()
+
+            micButton
+
+            statusLabel
+                .padding(.top, 8)
+
+            Spacer()
+
+            HStack {
+                globeButton
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
+        .frame(height: 270)
+        .background(Color(.systemBackground))
     }
 
-    private var barLabel: String {
-        switch recorder.state {
-        case .idle:           return "Hold to Talk"
-        case .requestingAuth: return "Requesting permission…"
-        case .recording:      return "Release to Send"
-        case .transcribing:   return "Transcribing…"
-        case .error(let msg): return msg
+    // MARK: - Subviews
+
+    @ViewBuilder
+    private var partialBar: some View {
+        if model.phase == .recording && !model.partialText.isEmpty {
+            Text(model.partialText)
+                .lineLimit(1)
+                .truncationMode(.head)
+                .foregroundColor(.white)
+                .font(.system(size: 14))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.darkGray))
+        }
+    }
+
+    private var micButton: some View {
+        Button(action: {
+            guard model.hasFullAccess else { return }
+            onTap()
+        }) {
+            ZStack {
+                Circle()
+                    .fill(buttonColor)
+                    .frame(width: 80, height: 80)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                    )
+                    .scaleEffect(model.phase == .recording ? 1.08 : 1.0)
+                    .animation(
+                        model.phase == .recording
+                            ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true)
+                            : .easeInOut(duration: 0.15),
+                        value: model.phase == .recording
+                    )
+
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 32, weight: .medium))
+                    .foregroundColor(micIconColor)
+            }
+        }
+        .disabled(!model.hasFullAccess)
+        .accessibilityLabel(accessibilityMicLabel)
+    }
+
+    private var statusLabel: some View {
+        Group {
+            if !model.hasFullAccess {
+                Text("Enable Full Access in Settings → Keyboards → VoiceInput → Allow Full Access")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+            } else {
+                switch model.phase {
+                case .starting where model.partialText.isEmpty:
+                    Text("Tap to record")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                case .starting:
+                    Text("Opening Voice Input\u{2026}")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                case .recording:
+                    HStack(spacing: 4) {
+                        Text(model.partialText.isEmpty ? "Listening" : String(model.partialText.prefix(40)))
+                            .lineLimit(1)
+                            .font(.system(size: 13))
+                            .foregroundColor(.primary)
+                        AnimatedDots()
+                    }
+                case .refining:
+                    Text("Refining\u{2026}")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                case .done:
+                    Text("\u{2713} Pasted")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.green)
+                case .error:
+                    Text(model.errorMessage ?? "Error")
+                        .font(.system(size: 13))
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                case .cancelled:
+                    Text("Cancelled")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                }
+            }
         }
     }
 
     private var globeButton: some View {
-        Button(action: onNextKeyboard) {
+        Button(action: onSwitch) {
             Image(systemName: "globe")
                 .font(.system(size: 18, weight: .medium))
                 .foregroundColor(.primary)
-                .frame(width: 36, height: 44)
+                .frame(width: 36, height: 36)
                 .background(Color(.secondarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
         }
+        .accessibilityLabel("Switch keyboard")
+    }
+
+    // MARK: - Helpers
+
+    private var buttonColor: Color {
+        if !model.hasFullAccess { return Color(.systemGray4) }
+        switch model.phase {
+        case .recording: return .red
+        case .done:      return .green
+        case .error:     return Color(.systemOrange)
+        default:         return Color(.secondarySystemBackground)
+        }
+    }
+
+    private var micIconColor: Color {
+        if !model.hasFullAccess { return Color(.systemGray2) }
+        switch model.phase {
+        case .recording, .done, .error: return .white
+        default: return .primary
+        }
+    }
+
+    private var accessibilityMicLabel: String {
+        model.hasFullAccess ? "Start voice input" : "Full access required"
     }
 }
 
-/// UIKit-backed horizontal press-and-hold bar. Mirrors the WeChat "按住说话" UX.
-struct PressAndHoldBar: UIViewRepresentable {
-    let isRecording: Bool
-    let label: String
-    let onPress: () -> Void
-    let onRelease: () -> Void
+// MARK: - Animated dots
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
+/// Three dots that cycle opacity to signal activity.
+private struct AnimatedDots: View {
+    @State private var step = 0
 
-    func makeUIView(context: Context) -> BarView {
-        let v = BarView()
-        v.setTitle(label)
-        v.setRecording(isRecording, animated: false)
-
-        let press = UILongPressGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handle(_:))
-        )
-        press.minimumPressDuration = 0
-        press.allowableMovement = .greatestFiniteMagnitude
-        v.addGestureRecognizer(press)
-        return v
-    }
-
-    func updateUIView(_ v: BarView, context: Context) {
-        v.setTitle(label)
-        v.setRecording(isRecording, animated: true)
-        context.coordinator.parent = self
-    }
-
-    final class Coordinator: NSObject {
-        var parent: PressAndHoldBar
-        init(_ parent: PressAndHoldBar) { self.parent = parent }
-
-        @objc func handle(_ g: UILongPressGestureRecognizer) {
-            switch g.state {
-            case .began:
-                parent.onPress()
-            case .ended, .cancelled, .failed:
-                parent.onRelease()
-            default:
-                break
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<3, id: \.self) { i in
+                Circle()
+                    .frame(width: 5, height: 5)
+                    .foregroundColor(.secondary)
+                    .opacity(step == i ? 1.0 : 0.3)
+            }
+        }
+        .onAppear {
+            withAnimation(.linear(duration: 0.4).repeatForever(autoreverses: false)) {
+                step = 0
+            }
+            Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
+                step = (step + 1) % 3
             }
         }
     }
-
-    /// The actual UIKit view — keeps title + state rendering in one place so SwiftUI's
-    /// update path doesn't churn the entire view hierarchy on every press.
-    final class BarView: UIView {
-        private let label = UILabel()
-        private let icon = UIImageView()
-
-        override init(frame: CGRect) {
-            super.init(frame: frame)
-            setup()
-        }
-        required init?(coder: NSCoder) { fatalError() }
-
-        private func setup() {
-            backgroundColor = .secondarySystemBackground
-            layer.cornerRadius = 10
-
-            label.textAlignment = .center
-            label.font = .systemFont(ofSize: 16, weight: .semibold)
-            label.textColor = .label
-
-            icon.image = UIImage(systemName: "mic.fill",
-                withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold))
-            icon.tintColor = .label
-            icon.contentMode = .scaleAspectFit
-
-            let stack = UIStackView(arrangedSubviews: [icon, label])
-            stack.axis = .horizontal
-            stack.spacing = 8
-            stack.alignment = .center
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(stack)
-
-            NSLayoutConstraint.activate([
-                stack.centerXAnchor.constraint(equalTo: centerXAnchor),
-                stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-                heightAnchor.constraint(greaterThanOrEqualToConstant: 56),
-            ])
-        }
-
-        func setTitle(_ text: String) {
-            if label.text != text { label.text = text }
-        }
-
-        func setRecording(_ recording: Bool, animated: Bool) {
-            let bg: UIColor = recording ? .systemRed : .secondarySystemBackground
-            let fg: UIColor = recording ? .white : .label
-            let apply = { [weak self] in
-                guard let self else { return }
-                self.backgroundColor = bg
-                self.label.textColor = fg
-                self.icon.tintColor = fg
-                self.transform = recording
-                    ? CGAffineTransform(scaleX: 1.02, y: 1.02)
-                    : .identity
-            }
-            if animated {
-                UIView.animate(withDuration: 0.15, animations: apply)
-            } else {
-                apply()
-            }
-        }
-    }
-}
-
-// Old circular mic kept only so other code that imports it still builds; unused in bar mode.
-struct PressAndHoldMic: UIViewRepresentable {
-    let isRecording: Bool
-    let onPress: () -> Void
-    let onRelease: () -> Void
-    func makeCoordinator() -> NSObject { NSObject() }
-    func makeUIView(context: Context) -> UIView { UIView() }
-    func updateUIView(_ view: UIView, context: Context) {}
 }

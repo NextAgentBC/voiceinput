@@ -1,29 +1,42 @@
 # VoiceInput iOS build helpers.
 #
 # Requires: Xcode 16+, xcodegen (brew install xcodegen).
-# Signing: open VoiceInputiOS.xcodeproj after `make gen`, set your Team on both targets,
+# Signing: open VoiceInputiOS.xcodeproj after `make open`, set your Team on both targets,
 # then Product → Archive for TestFlight upload.
 
-PROJECT = VoiceInputiOS.xcodeproj
+PROJECT    = VoiceInputiOS.xcodeproj
 SCHEME_APP = VoiceInputiOS
 SCHEME_KB  = VoiceInputKeyboard
 
-.PHONY: gen open build-sim clean
+.PHONY: generate gen build open archive build-sim clean
 
-gen:
-	xcodegen generate
+# Canonical name expected by the plan + CI.
+generate:
+	@xcodegen generate
 
-open: gen
-	open $(PROJECT)
+# Short alias kept for backward compat.
+gen: generate
 
-build-sim: gen
-	xcodebuild \
-	  -project $(PROJECT) \
-	  -scheme $(SCHEME_APP) \
-	  -configuration Debug \
-	  -destination 'generic/platform=iOS Simulator' \
-	  CODE_SIGNING_ALLOWED=NO \
-	  build
+build: generate
+	@xcodebuild -project $(PROJECT) \
+		-scheme $(SCHEME_APP) \
+		-configuration Debug \
+		-destination 'generic/platform=iOS Simulator' \
+		CODE_SIGNING_ALLOWED=NO \
+		build
+
+open: generate
+	@open $(PROJECT)
+
+archive: generate
+	@xcodebuild -project $(PROJECT) \
+		-scheme $(SCHEME_APP) \
+		-configuration Release \
+		-archivePath build/VoiceInputiOS.xcarchive \
+		archive
+
+# Alias kept for backward compat.
+build-sim: build
 
 clean:
-	rm -rf $(PROJECT) build DerivedData
+	@rm -rf build/ DerivedData/ $(PROJECT)
