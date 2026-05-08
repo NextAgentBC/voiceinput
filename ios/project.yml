@@ -12,7 +12,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: 'WA4JUD762R'
     MARKETING_VERSION: '0.1.0'
-    CURRENT_PROJECT_VERSION: '9'
+    CURRENT_PROJECT_VERSION: '10'
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     # Shared app group for Settings exchange between container and keyboard.
     # Replace with your own group id after creating it in the Developer portal.
