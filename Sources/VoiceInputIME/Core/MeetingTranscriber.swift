@@ -99,7 +99,10 @@ final class MeetingTranscriber {
                 self?.handle(buffer: buffer, inputFormat: format, outFormat: outFormat)
             },
             onLevel: { _ in },
-            bufferSize: 4096
+            bufferSize: 4096,
+            // Meeting mode captures multiple speakers — voice processing would
+            // suppress everyone but the mic-closest speaker.
+            voiceProcessing: false
         ))
         converter = AVAudioConverter(from: inputFormat, to: outFormat)
         if converter == nil { throw STTError.noInputDevice }

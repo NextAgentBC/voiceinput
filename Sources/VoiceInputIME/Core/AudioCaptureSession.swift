@@ -15,6 +15,10 @@ final class AudioCaptureSession {
         let onLevel: (Float) -> Void
         /// AVAudio tap buffer size.
         var bufferSize: AVAudioFrameCount = 4096
+        /// Route input through Apple's AUVoiceIO unit for AEC, noise
+        /// suppression, and single-speaker isolation. Default true (single-user
+        /// dictation). Set false for multi-speaker capture (e.g. meetings).
+        var voiceProcessing: Bool = true
     }
 
     private var engine: AVAudioEngine?
@@ -28,6 +32,15 @@ final class AudioCaptureSession {
         self.engine = engine
 
         let inputNode = engine.inputNode
+        // Voice processing must be toggled BEFORE reading the input format —
+        // enabling it swaps in AUVoiceIO and the resulting format may differ.
+        if config.voiceProcessing {
+            do {
+                try inputNode.setVoiceProcessingEnabled(true)
+            } catch {
+                audioLog.warning("setVoiceProcessingEnabled failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
         let inputFormat = inputNode.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0 else { throw STTError.noInputDevice }
 
